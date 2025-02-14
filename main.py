@@ -9,8 +9,8 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-ICONS = os.path.join(os.path.abspath(os.getcwd()), r'.local/share/icons/AdGuardVPN')
-ICON_UNKNOWN = os.path.join(ICONS, r'AdGuardVPN_Unknown.png')
+ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
+ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
 
 
 def main():

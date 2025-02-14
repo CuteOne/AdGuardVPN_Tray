@@ -10,10 +10,10 @@ from settings_manager import load_setting, save_setting
 from login_dialog import LoginDialog
 
 # Configurable constants for icons, etc.
-ICONS = os.path.join(os.path.abspath(os.getcwd()), r'.local/share/icons/AdGuardVPN')
-ICON_CONNECTED = os.path.join(ICONS, r'AdGuardVPN_Connected.png')
-ICON_DISCONNECTED = os.path.join(ICONS, r'AdGuardVPN_Disconnected.png')
-ICON_UNKNOWN = os.path.join(ICONS, r'AdGuardVPN_Unknown.png')
+ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
+ICON_CONNECTED = os.path.join(ICONS, r'Connected.png')
+ICON_DISCONNECTED = os.path.join(ICONS, r'Disconnected.png')
+ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
 
 class VpnTray(QtWidgets.QSystemTrayIcon):
     def __init__(self, icon, parent=None):
