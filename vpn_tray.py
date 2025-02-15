@@ -1,4 +1,5 @@
 # vpn_tray.py
+import logging
 import os
 import re
 import functools
@@ -121,34 +122,38 @@ class VpnTray(QtWidgets.QSystemTrayIcon):
         self.connect_vpn()
 
     def login_logout(self):
-        if self.logged_in_user is None:
-            dlg = LoginDialog()
-            if dlg.exec_() == QtWidgets.QDialog.Accepted:
-                username = dlg.username
-                password = dlg.password
-                cmd = f"{SUDO_CMD} {VPN_CLI_PATH} login -u {username} -p {password}"
-                stdout, stderr, returncode = run_command(cmd, "Login")
-                if returncode != 0:
-                    QtWidgets.QMessageBox.warning(None, "Login Failed", f"Login failed:\n{stderr}")
-                else:
-                    self.logged_in_user = username
-                    save_setting("logged_in_user", self.logged_in_user)
-                    self.login_logout_action.setText(f"Logout {username}")
-                    QtWidgets.QMessageBox.information(None, "Login", "Login successful.")
-                    self.connect_action.setEnabled(True)
-                    self.disconnect_action.setEnabled(True)
-        else:
-            cmd = f"{SUDO_CMD} {VPN_CLI_PATH} logout"
-            stdout, stderr, returncode = run_command(cmd, "Logout")
-            if returncode != 0:
-                QtWidgets.QMessageBox.warning(None, "Logout Failed", f"Logout failed:\n{stderr}")
+        try:
+            if self.logged_in_user is None:
+                dlg = LoginDialog()
+                if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                    username = dlg.username
+                    password = dlg.password
+                    cmd = f"{SUDO_CMD} {VPN_CLI_PATH} login -u {username} -p {password}"
+                    stdout, stderr, returncode = run_command(cmd, "Login")
+                    if returncode != 0:
+                        QtWidgets.QMessageBox.warning(None, "Login Failed", f"Login failed:\n{stderr}")
+                    else:
+                        self.logged_in_user = username
+                        save_setting("logged_in_user", self.logged_in_user)
+                        self.login_logout_action.setText(f"Logout {username}")
+                        QtWidgets.QMessageBox.information(None, "Login", "Login successful.")
+                        self.connect_action.setEnabled(True)
+                        self.disconnect_action.setEnabled(True)
             else:
-                QtWidgets.QMessageBox.information(None, "Logout", "Logout successful.")
-                save_setting("logged_in_user", None)
-                self.logged_in_user = None
-                self.login_logout_action.setText("Login")
-                self.connect_action.setEnabled(False)
-                self.disconnect_action.setEnabled(False)
+                cmd = f"{SUDO_CMD} {VPN_CLI_PATH} logout"
+                stdout, stderr, returncode = run_command(cmd, "Logout")
+                if returncode != 0:
+                    QtWidgets.QMessageBox.warning(None, "Logout Failed", f"Logout failed:\n{stderr}")
+                else:
+                    QtWidgets.QMessageBox.information(None, "Logout", "Logout successful.")
+                    save_setting("logged_in_user", None)
+                    self.logged_in_user = None
+                    self.login_logout_action.setText("Login")
+                    self.connect_action.setEnabled(False)
+                    self.disconnect_action.setEnabled(False)
+        except Exception as e:
+            logging.exception("Exception in login_logout: %s", e)
+            QtWidgets.QMessageBox.critical(None, "Error", f"An unexpected error occurred: {e}")
 
     def connect_vpn(self):
         if self.logged_in_user is None:

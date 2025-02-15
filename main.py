@@ -7,7 +7,14 @@ from settings_manager import load_setting
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("app_debug.log", mode="w")
+    ]
+)
 
 ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
 ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
@@ -18,6 +25,8 @@ def main():
     QtCore.QCoreApplication.setApplicationName("VPNController")
 
     app = QtWidgets.QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)  # Ensure the app keeps running even if no windows are visible
+    
     default_icon = QtGui.QIcon.fromTheme("network-vpn")
     if default_icon.isNull():
         default_icon = QtGui.QIcon(ICON_UNKNOWN)
