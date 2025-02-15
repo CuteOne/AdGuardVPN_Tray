@@ -1,7 +1,7 @@
 <RCC>
     <qresource prefix="/icons">
-        <file>resources/icons/Connected.png</file>
-        <file>resources/icons/Disconnected.png</file>
-        <file>resources/icons/Unknown.png</file>
+        <file>icons/Connected.png</file>
+        <file>icons/Disconnected.png</file>
+        <file>icons/Unknown.png</file>
     </qresource>
 </RCC>
