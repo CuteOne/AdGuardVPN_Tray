@@ -5,6 +5,7 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 from vpn_tray import VpnTray
 from settings_manager import load_setting
 import logging
+import resources_rc
 
 # Configure logging
 logging.basicConfig(
@@ -16,8 +17,9 @@ logging.basicConfig(
     ]
 )
 
-ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
-ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
+#ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
+#ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
+ICON_UNKNOWN = QtGui.QIcon(":/icons/Unknown.png")
 
 
 def main():

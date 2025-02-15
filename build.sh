@@ -26,12 +26,16 @@ pyinstaller --onefile --windowed --name "$APP_NAME" --add-data "resources/icons:
 mkdir -p "$APPDIR/usr/bin"
 cp "$DIST_DIR/$APP_NAME" "$APPDIR/usr/bin/"
 
+# Copy external icon for the desktop launcher
+mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+cp "resources/icons/Connected.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png"
+
 mkdir -p "$APPDIR/usr/share/applications"
 cat > "$APPDIR/usr/share/applications/$APP_NAME.desktop" <<EOL
 [Desktop Entry]
 Name=AdGuard VPN Tray
 Exec=$APP_NAME
-Icon=resources/icons/Unknown.png
+Icon=$APP_NAME
 Terminal=false
 Type=Application
 Categories=Network;

@@ -11,10 +11,13 @@ from settings_manager import load_setting, save_setting
 from login_dialog import LoginDialog
 
 # Configurable constants for icons, etc.
-ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
-ICON_CONNECTED = os.path.join(ICONS, r'Connected.png')
-ICON_DISCONNECTED = os.path.join(ICONS, r'Disconnected.png')
-ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
+#ICONS = os.path.join(os.path.abspath(os.getcwd()), r'resources/icons')
+#ICON_CONNECTED = os.path.join(ICONS, r'Connected.png')
+#ICON_DISCONNECTED = os.path.join(ICONS, r'Disconnected.png')
+#ICON_UNKNOWN = os.path.join(ICONS, r'Unknown.png')
+ICON_CONNECTED = QtGui.QIcon(":/icons/Connected.png")
+ICON_DISCONNECTED = QtGui.QIcon(":/icons/Disconnected.png")
+ICON_UNKNOWN = QtGui.QIcon(":/icons/Unknown.png")
 
 class VpnTray(QtWidgets.QSystemTrayIcon):
     def __init__(self, icon, parent=None):
@@ -216,17 +219,18 @@ class VpnTray(QtWidgets.QSystemTrayIcon):
         self.setToolTip(f"VPN Status: {display_status}")
         self.status_action.setText(f"Status: {display_status}")
         if normalized_status == "connected":
-            icon_path = ICON_CONNECTED
+            self.setIcon(ICON_CONNECTED)
         elif normalized_status == "disconnected":
-            icon_path = ICON_DISCONNECTED
+            self.setIcon(ICON_DISCONNECTED)
         else:
-            icon_path = ICON_UNKNOWN
-        self.set_icon(icon_path)
+            self.setIcon(ICON_UNKNOWN)
+        self.show()
 
-    def set_icon(self, icon_path):
-        new_icon = QtGui.QIcon(icon_path)
-        if not new_icon.isNull():
-            self.setIcon(new_icon)
+    def set_icon(self, resource_path):
+        new_icon = QtGui.QIcon(resource_path)
+        if new_icon.isNull():
+            logging.error("Embedded icon not loaded: %s", resource_path)
+        self.setIcon(new_icon)
         self.show()
 
     def cleanup(self):
