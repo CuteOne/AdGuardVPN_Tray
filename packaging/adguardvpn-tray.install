@@ -1,0 +1,9 @@
+post_install() {
+	echo "=> adguardvpn-tray installed."
+	echo "   One-time setup is still required before Connect/Disconnect will work:"
+	echo "   see the 'One-time setup' section in the project README."
+}
+
+post_upgrade() {
+	post_install
+}

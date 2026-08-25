@@ -1,0 +1,32 @@
+# Maintainer: Ashley <ph34rt3hcute1@gmail.com>
+#
+# NOTE: update `url` and the `source` line below once this project is pushed
+# to its real GitHub repo (replace YOUR_GITHUB_USERNAME).
+#
+# Build locally with: cd packaging && makepkg -si
+
+pkgname=adguardvpn-tray
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="KDE Plasma system tray application for managing AdGuard VPN via adguardvpn-cli"
+arch=('any')
+url="https://github.com/YOUR_GITHUB_USERNAME/adguardvpn-tray"
+license=('MIT')
+depends=('pyside6' 'python-pexpect')
+makedepends=('python-build' 'python-installer' 'python-wheel')
+optdepends=('adguardvpn-cli: the VPN client this app manages')
+install="${pkgname}.install"
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+	cd "$pkgname-$pkgver"
+	python -m build --wheel --no-isolation
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	python -m installer --destdir="$pkgdir" dist/*.whl
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 packaging/adguardvpn-tray.desktop "$pkgdir/usr/share/applications/adguardvpn-tray.desktop"
+}

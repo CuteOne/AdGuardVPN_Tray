@@ -1,0 +1,84 @@
+[1mISO   COUNTRY              CITY                           PING ESTIMATE
+[0mUS    United States        Atlanta                        12        
+US    United States        New York                       20        
+CA    Canada               Toronto                        24        
+US    United States        Chicago                        27        
+US    United States        Miami                          30        
+CA    Canada               Montreal                       33        
+US    United States        Boston                         33        
+US    United States        Dallas                         48        
+US    United States        Denver                         58        
+MX    Mexico               Mexico City                    71        
+US    United States        Phoenix                        82        
+US    United States        Las Vegas                      85        
+US    United States        Los Angeles                    96        
+CO    Colombia             Bogota                         105       
+US    United States        Silicon Valley                 106       
+US    United States        Seattle                        107       
+CA    Canada               Vancouver                      110       
+PE    Peru                 Lima                           158       
+IE    Ireland              Dublin                         173       
+PT    Portugal             Lisbon                         174       
+GB    United Kingdom       London                         180       
+GB    United Kingdom       Manchester                     181       
+NL    Netherlands          Amsterdam                      188       
+BE    Belgium              Brussels                       190       
+FR    France               Paris                          194       
+ES    Spain                Madrid                         194       
+NO    Norway               Oslo                           196       
+RU    Russia               Moscow (Virtual)               197       
+ES    Spain                Barcelona                      200       
+LU    Luxembourg           Luxembourg                     200       
+SE    Sweden               Stockholm                      202       
+DE    Germany              Frankfurt                      203       
+DK    Denmark              Copenhagen                     204       
+DE    Germany              Berlin                         205       
+FR    France               Marseille                      205       
+IT    Italy                Milan                          210       
+CH    Switzerland          Zurich                         211       
+EE    Estonia              Tallinn                        214       
+CZ    Czechia              Prague                         215       
+BR    Brazil               São Paulo                      217       
+LV    Latvia               Riga                           217       
+PL    Poland               Warsaw                         217       
+FI    Finland              Helsinki                       218       
+AT    Austria              Vienna                         220       
+LT    Lithuania            Vilnius                        221       
+IT    Italy                Rome                           221       
+HU    Hungary              Budapest                       224       
+CL    Chile                Santiago                       226       
+SK    Slovakia             Bratislava                     226       
+HR    Croatia              Zagreb                         228       
+IT    Italy                Palermo                        229       
+UA    Ukraine              Kyiv                           236       
+RS    Serbia               Belgrade                       237       
+BG    Bulgaria             Sofia                          239       
+AR    Argentina            Buenos Aires                   241       
+MD    Moldova              Chișinău                       242       
+RO    Romania              Bucharest                      248       
+GR    Greece               Athens                         252       
+TR    Turkey               Istanbul                       253       
+NG    Nigeria              Lagos                          265       
+CY    Cyprus               Nicosia                        280       
+EG    Egypt                Cairo                          280       
+IL    Israel               Tel Aviv                       289       
+KZ    Kazakhstan           Astana                         292       
+JP    Japan                Tokyo                          325       
+KR    South Korea          Seoul                          334       
+AE    UAE                  Dubai                          342       
+CN    China                Shanghai (Virtual)             354       
+NP    Nepal                Kathmandu                      373       
+TW    Taiwan               Taipei                         375       
+ZA    South Africa         Johannesburg                   387       
+NZ    New Zealand          Auckland                       388       
+HK    Hong Kong            Hong Kong                      393       
+VN    Vietnam              Hanoi                          398       
+PH    Philippines          Manila                         406       
+TH    Thailand             Bangkok                        417       
+KH    Cambodia             Phnom Penh                     424       
+AU    Australia            Sydney                         451       
+IN    India                Mumbai (Virtual)               457       
+SG    Singapore            Singapore                      458       
+ID    Indonesia            Jakarta                        486       
+
+You can connect to a location by running `adguardvpn-cli connect -l 'city, country or ISO code'`
