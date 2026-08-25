@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from adguardvpn_tray.services import error_reporter
 from adguardvpn_tray.services.login_service import LoginService
 
 
@@ -79,12 +80,14 @@ class LoginDialog(QDialog):
 
     def _on_failed(self, message: str) -> None:
         self._status_label.setText(f"Login failed: {message.strip() or 'unknown error'}")
+        error_reporter.report_error("login_failed", message)
         self._buttons.clear()
         self._buttons.addButton(QDialogButtonBox.StandardButton.Close)
         self._buttons.rejected.connect(self.reject)
 
     def _on_timed_out(self) -> None:
         self._status_label.setText("Login timed out waiting for browser confirmation.")
+        error_reporter.report_error("login_timeout", "Login timed out waiting for browser confirmation.")
         self._buttons.clear()
         self._buttons.addButton(QDialogButtonBox.StandardButton.Close)
         self._buttons.rejected.connect(self.reject)

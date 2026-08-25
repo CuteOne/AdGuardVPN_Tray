@@ -18,6 +18,7 @@ class AppConfig:
     default_connect_target: str = "fastest"  # "fastest" | "last"
     auto_connect_on_launch: bool = True
     auto_reconnect_on_drop: bool = True
+    verify_ip_on_connect: bool = True
     binary_path_override: str | None = None
     show_notifications: bool = True
     last_update_check_iso: str | None = None

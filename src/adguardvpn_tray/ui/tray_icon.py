@@ -10,7 +10,7 @@ from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.locations_parser import parse_locations
-from adguardvpn_tray.services import autostart
+from adguardvpn_tray.services import autostart, error_reporter, ip_checker
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.notifier import Notifier
 from adguardvpn_tray.services.poller import Poller
@@ -43,6 +43,8 @@ class TrayIcon(QSystemTrayIcon):
         self._was_connected = False
         self._reconnect_attempts = 0
         self._pending_connect_reason = "manual"
+        self._baseline_ip: str | None = None
+        self._ip_verify_attempts = 0
 
         self._build_menu()
         self.setContextMenu(self._menu)
@@ -139,6 +141,11 @@ class TrayIcon(QSystemTrayIcon):
         self._autoreconnect_drop_action.setChecked(self.config.auto_reconnect_on_drop)
         self._autoreconnect_drop_action.triggered.connect(self._on_autoreconnect_drop_toggled)
 
+        self._verify_ip_action = menu.addAction("Verify IP after connecting")
+        self._verify_ip_action.setCheckable(True)
+        self._verify_ip_action.setChecked(self.config.verify_ip_on_connect)
+        self._verify_ip_action.triggered.connect(self._on_verify_ip_toggled)
+
         self._autostart_action = menu.addAction("Autostart on login")
         self._autostart_action.setCheckable(True)
         self._autostart_action.setChecked(autostart.is_enabled())
@@ -213,6 +220,7 @@ class TrayIcon(QSystemTrayIcon):
             self._optimistic = None
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text="Timed out waiting for status")
             self.notifier.notify("AdGuard VPN", "Timed out waiting for a status update.")
+            error_reporter.report_error("status_timeout", "Timed out waiting for a status update after connect/disconnect.")
             self._refresh_ui()
 
     # -- poller callbacks ----------------------------------------------------
@@ -225,6 +233,7 @@ class TrayIcon(QSystemTrayIcon):
         if previous_optimistic == ConnectionState.CONNECTING and status.state == ConnectionState.CONNECTED:
             self._optimistic = None
             self.notifier.notify("AdGuard VPN", f"Connected to {status.location or 'VPN'}")
+            self._maybe_verify_post_connect_ip()
         elif previous_optimistic == ConnectionState.DISCONNECTING and status.state == ConnectionState.DISCONNECTED:
             self._optimistic = None
             self.notifier.notify("AdGuard VPN", "Disconnected")
@@ -237,6 +246,7 @@ class TrayIcon(QSystemTrayIcon):
             # (not a user-initiated disconnect, not a location switch) - it's a real drop.
             unexpected_drop = was_connected and previous_optimistic is None
             self._was_connected = False
+            self._maybe_capture_baseline_ip()
             if unexpected_drop:
                 self._handle_unexpected_drop()
 
@@ -267,6 +277,42 @@ class TrayIcon(QSystemTrayIcon):
         fastest = self.config.default_connect_target == "fastest"
         self._do_connect(fastest=fastest, reason="auto_reconnect")
 
+    def _maybe_capture_baseline_ip(self) -> None:
+        if not self.config.verify_ip_on_connect:
+            return
+        self.runner.submit(ip_checker.get_public_ip, on_finished=self._on_baseline_ip_result)
+
+    def _on_baseline_ip_result(self, ip: str | None) -> None:
+        if ip:
+            self._baseline_ip = ip
+
+    def _maybe_verify_post_connect_ip(self) -> None:
+        if not self.config.verify_ip_on_connect or not self._baseline_ip:
+            return
+        self._ip_verify_attempts = 0
+        # Give the OS-level route/interface switch a moment to settle after the CLI
+        # reports "Connected" - checking immediately can still observe the pre-VPN route.
+        QTimer.singleShot(constants.IP_VERIFY_SETTLE_DELAY_MS, self._run_post_connect_ip_check)
+
+    def _run_post_connect_ip_check(self) -> None:
+        if self._status.state != ConnectionState.CONNECTED:
+            return
+        self.runner.submit(ip_checker.get_public_ip, on_finished=self._on_post_connect_ip_result)
+
+    def _on_post_connect_ip_result(self, ip: str | None) -> None:
+        if not ip or ip != self._baseline_ip:
+            return  # changed (or check failed) - nothing to report either way
+
+        self._ip_verify_attempts += 1
+        if self._ip_verify_attempts < constants.IP_VERIFY_MAX_ATTEMPTS:
+            # Route may still be settling - retry a few times before concluding anything.
+            QTimer.singleShot(constants.IP_VERIFY_SETTLE_DELAY_MS, self._run_post_connect_ip_check)
+            return
+
+        message = f"Connected, but your public IP ({ip}) hasn't changed — traffic may not be routed through the VPN."
+        self.notifier.notify("AdGuard VPN", message)
+        error_reporter.report_error("ip_verify_mismatch", message)
+
     def _on_license_updated(self, info: LicenseInfo) -> None:
         self._license = info
         self._license_checked = True
@@ -277,6 +323,7 @@ class TrayIcon(QSystemTrayIcon):
         self._status_action.setText("adguardvpn-cli not found on PATH")
         self.setIcon(icons.icon_for_state(ConnectionState.ERROR))
         self._primary_action.setEnabled(False)
+        error_reporter.report_error("cli_missing", "adguardvpn-cli not found on PATH")
 
     # -- connect / disconnect -------------------------------------------------
 
@@ -316,8 +363,10 @@ class TrayIcon(QSystemTrayIcon):
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=message)
             if reason == "auto_reconnect":
                 self.notifier.notify("AdGuard VPN", "Auto-reconnect gave up after repeated failures.")
+                error_reporter.report_error("auto_reconnect_failed", message)
             else:
                 self.notifier.notify("AdGuard VPN", f"Connect failed: {message[:200]}")
+                error_reporter.report_error("connect_failed", message)
             self._refresh_ui()
         else:
             self.poller.force_repoll()
@@ -335,6 +384,7 @@ class TrayIcon(QSystemTrayIcon):
             message = strip_ansi(result.stderr or result.stdout).strip()
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=message)
             self.notifier.notify("AdGuard VPN", f"Disconnect failed: {message[:200]}")
+            error_reporter.report_error("disconnect_failed", message)
             self._refresh_ui()
         else:
             self.poller.force_repoll()
@@ -457,6 +507,10 @@ class TrayIcon(QSystemTrayIcon):
         self.config.auto_reconnect_on_drop = checked
         self.config.save()
 
+    def _on_verify_ip_toggled(self, checked: bool) -> None:
+        self.config.verify_ip_on_connect = checked
+        self.config.save()
+
     def _on_autostart_toggled(self, checked: bool) -> None:
         autostart.set_enabled(checked)
         self.config.autostart_enabled = checked
@@ -498,4 +552,5 @@ class TrayIcon(QSystemTrayIcon):
             self.notifier.notify("AdGuard VPN", "CLI updated successfully.")
         else:
             self.notifier.notify("AdGuard VPN", f"Update failed: {message[:200]}")
+            error_reporter.report_error("update_failed", message)
         self.poller.force_repoll()

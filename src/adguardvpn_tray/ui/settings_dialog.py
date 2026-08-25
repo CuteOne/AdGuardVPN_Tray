@@ -2,9 +2,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
 from adguardvpn_tray.adapters.cli_adapter import CliAdapter
 from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.parsers.ansi import strip_ansi
+from adguardvpn_tray.services import error_reporter
 
 
 class SettingsDialog(QDialog):
@@ -28,6 +31,7 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_general_tab(), "General")
         tabs.addTab(self._build_config_tab(), "CLI Configuration")
+        tabs.addTab(self._build_diagnostics_tab(), "Diagnostics")
         tabs.addTab(self._build_exclusions_tab(), "Site Exclusions")
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -65,6 +69,35 @@ class SettingsDialog(QDialog):
         text.setPlainText(strip_ansi(result.stdout) or "Unable to read configuration.")
         layout.addWidget(text)
         return widget
+
+    def _build_diagnostics_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self._error_log_text = QPlainTextEdit()
+        self._error_log_text.setReadOnly(True)
+        self._reload_error_log()
+        layout.addWidget(self._error_log_text)
+
+        buttons = QHBoxLayout()
+        refresh_button = QPushButton("Refresh")
+        refresh_button.clicked.connect(self._reload_error_log)
+        clear_button = QPushButton("Clear Log")
+        clear_button.clicked.connect(self._on_clear_error_log)
+        buttons.addWidget(refresh_button)
+        buttons.addWidget(clear_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+
+        return widget
+
+    def _reload_error_log(self) -> None:
+        content = error_reporter.read_log()
+        self._error_log_text.setPlainText(content or "No errors recorded.")
+
+    def _on_clear_error_log(self) -> None:
+        error_reporter.clear_log()
+        self._reload_error_log()
 
     def _build_exclusions_tab(self) -> QWidget:
         widget = QWidget()
