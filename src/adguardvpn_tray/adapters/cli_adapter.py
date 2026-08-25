@@ -56,7 +56,10 @@ class CliAdapter:
 
         env = {**os.environ, **_LOCALE_ENV}
         if needs_root:
-            cmd = ["sudo", "-n", "-E", self.binary_path, *args]
+            # HOME reaches the elevated process via the sudoers "env_keep" Defaults
+            # entry (see privilege_setup.py), not via -E, to avoid granting a blanket
+            # SETENV right that would let a caller pass arbitrary env vars to root.
+            cmd = ["sudo", "-n", self.binary_path, *args]
         else:
             cmd = [self.binary_path, *args]
 

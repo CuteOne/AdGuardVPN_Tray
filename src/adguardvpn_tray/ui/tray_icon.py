@@ -2,20 +2,21 @@ import time
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QActionGroup
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from adguardvpn_tray import constants
+from adguardvpn_tray import __version__, constants
 from adguardvpn_tray.adapters.cli_adapter import CliAdapter
 from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.locations_parser import parse_locations
-from adguardvpn_tray.services import autostart, error_reporter, ip_checker
+from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.notifier import Notifier
 from adguardvpn_tray.services.poller import Poller
 from adguardvpn_tray.services.update_checker import UpdateChecker
 from adguardvpn_tray.ui import icons
+from adguardvpn_tray.ui.favorites_dialog import FavoritesDialog, location_key
 from adguardvpn_tray.ui.login_dialog import LoginDialog
 from adguardvpn_tray.ui.region_map import CONTINENT_ORDER, continent_for
 from adguardvpn_tray.ui.settings_dialog import SettingsDialog
@@ -48,7 +49,6 @@ class TrayIcon(QSystemTrayIcon):
 
         self._build_menu()
         self.setContextMenu(self._menu)
-        self.activated.connect(self._on_activated)
 
         self.poller.status_updated.connect(self._on_status_updated)
         self.poller.license_updated.connect(self._on_license_updated)
@@ -60,6 +60,7 @@ class TrayIcon(QSystemTrayIcon):
         self.show()
         self.poller.start()
         self.update_checker.start()
+        self._check_privilege_setup()
 
     # -- menu construction -------------------------------------------------
 
@@ -87,12 +88,21 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
         self._check_update_action = menu.addAction("Check for CLI updates…")
         self._check_update_action.triggered.connect(self._on_check_updates_clicked)
+        about_action = menu.addAction("About")
+        about_action.triggered.connect(self._show_about)
 
         menu.addSeparator()
         quit_action = menu.addAction("Quit")
         quit_action.triggered.connect(QApplication.quit)
 
         self._menu = menu
+
+    def _add_menu_header(self, menu: QMenu, text: str) -> None:
+        # QMenu.addSection() doesn't reliably render its label under every Qt
+        # style/theme (observed blank on Breeze/Plasma 6) - a disabled action does.
+        menu.addSeparator()
+        header = menu.addAction(text)
+        header.setEnabled(False)
 
     def _build_account_menu(self) -> QMenu:
         menu = QMenu("Account")
@@ -112,6 +122,8 @@ class TrayIcon(QSystemTrayIcon):
     def _build_settings_menu(self) -> QMenu:
         menu = QMenu("Settings")
 
+        self._add_menu_header(menu, "Connection Behavior")
+
         target_group = QActionGroup(menu)
         target_group.setExclusive(True)
         self._target_fastest_action = menu.addAction("Default connect target: Fastest")
@@ -129,8 +141,6 @@ class TrayIcon(QSystemTrayIcon):
         else:
             self._target_fastest_action.setChecked(True)
 
-        menu.addSeparator()
-
         self._autoconnect_launch_action = menu.addAction("Auto-connect on launch")
         self._autoconnect_launch_action.setCheckable(True)
         self._autoconnect_launch_action.setChecked(self.config.auto_connect_on_launch)
@@ -146,6 +156,8 @@ class TrayIcon(QSystemTrayIcon):
         self._verify_ip_action.setChecked(self.config.verify_ip_on_connect)
         self._verify_ip_action.triggered.connect(self._on_verify_ip_toggled)
 
+        self._add_menu_header(menu, "App Behavior")
+
         self._autostart_action = menu.addAction("Autostart on login")
         self._autostart_action.setCheckable(True)
         self._autostart_action.setChecked(autostart.is_enabled())
@@ -157,6 +169,8 @@ class TrayIcon(QSystemTrayIcon):
         self._notifications_action.triggered.connect(self._on_notifications_toggled)
 
         menu.addSeparator()
+        setup_permissions_action = menu.addAction("Set up VPN permissions…")
+        setup_permissions_action.triggered.connect(self._on_setup_permissions_clicked)
         advanced_action = menu.addAction("Advanced settings…")
         advanced_action.triggered.connect(self._open_settings_dialog)
 
@@ -326,10 +340,9 @@ class TrayIcon(QSystemTrayIcon):
         error_reporter.report_error("cli_missing", "adguardvpn-cli not found on PATH")
 
     # -- connect / disconnect -------------------------------------------------
-
-    def _on_activated(self, reason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self._on_primary_action()
+    # Note: left-click on the tray icon is intentionally not wired to any action -
+    # a stray click shouldn't be able to silently drop an active VPN connection.
+    # Right-click (Qt's own contextMenu handling via setContextMenu) is the way in.
 
     def _on_primary_action(self) -> None:
         state = self._effective_state()
@@ -425,6 +438,16 @@ class TrayIcon(QSystemTrayIcon):
             empty.setEnabled(False)
             return
 
+        favorite_keys = set(self.config.favorite_locations)
+        favorites = [loc for loc in self._locations if location_key(loc) in favorite_keys]
+        if favorites:
+            self._add_menu_header(menu, "★ Favorites")
+            for loc in favorites:
+                label = f"{loc.city}, {loc.country} ({loc.iso}) — {loc.ping_ms} ms"
+                action = menu.addAction(label)
+                action.triggered.connect(lambda checked=False, city=loc.city: self._do_connect(location=city))
+            menu.addSeparator()
+
         by_continent: dict[str, list] = {}
         for loc in self._locations:
             by_continent.setdefault(continent_for(loc.iso), []).append(loc)
@@ -442,6 +465,18 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
         refresh_action = menu.addAction("Refresh")
         refresh_action.triggered.connect(self._fetch_locations)
+        manage_favorites_action = menu.addAction("Manage Favorites…")
+        manage_favorites_action.triggered.connect(self._open_favorites_dialog)
+
+    def _open_favorites_dialog(self) -> None:
+        if not self._locations:
+            QMessageBox.information(None, "Favorites", "Locations haven't loaded yet — open the Locations menu first.")
+            return
+        dialog = FavoritesDialog(self._locations, set(self.config.favorite_locations))
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.config.favorite_locations = sorted(dialog.selected_keys())
+            self.config.save()
+            self._populate_locations_menu()
 
     # -- account -------------------------------------------------------------
 
@@ -523,6 +558,51 @@ class TrayIcon(QSystemTrayIcon):
     def _open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self.config, self.cli, on_refresh_interval_changed=self.poller.set_interval)
         dialog.exec()
+
+    # -- privilege setup -----------------------------------------------------
+
+    def _check_privilege_setup(self) -> None:
+        if privilege_setup.is_configured():
+            return
+        reply = QMessageBox.question(
+            None,
+            "One-time setup needed",
+            "AdGuard VPN Tray needs a one-time permission grant to connect/disconnect the VPN.\n\n"
+            "This will show a system authentication prompt once — no manual file editing required.\n\n"
+            "Set up now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._run_privilege_setup()
+
+    def _on_setup_permissions_clicked(self) -> None:
+        if privilege_setup.is_configured():
+            QMessageBox.information(None, "VPN Permissions", "Already configured.")
+            return
+        self._run_privilege_setup()
+
+    def _run_privilege_setup(self) -> None:
+        self.runner.submit(
+            lambda: privilege_setup.run_setup(self.cli.binary_path),
+            on_finished=self._on_privilege_setup_result,
+        )
+
+    def _on_privilege_setup_result(self, result: tuple[bool, str]) -> None:
+        success, message = result
+        if success:
+            self.notifier.notify("AdGuard VPN", message)
+        else:
+            QMessageBox.warning(None, "Setup failed", message)
+            error_reporter.report_error("privilege_setup_failed", message)
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            None,
+            "About AdGuard VPN Tray",
+            f"<b>AdGuard VPN Tray</b> v{__version__}<br><br>"
+            "A KDE Plasma system tray application for managing AdGuard VPN.<br><br>"
+            "License: MIT",
+        )
 
     # -- updates -----------------------------------------------------------
 

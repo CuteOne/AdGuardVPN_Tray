@@ -22,7 +22,7 @@ class AppConfig:
     binary_path_override: str | None = None
     show_notifications: bool = True
     last_update_check_iso: str | None = None
-    favorite_isos: list[str] = field(default_factory=list)
+    favorite_locations: list[str] = field(default_factory=list)
 
     def save(self) -> None:
         path = config_path()

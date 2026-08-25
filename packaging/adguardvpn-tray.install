@@ -1,7 +1,8 @@
 post_install() {
 	echo "=> adguardvpn-tray installed."
-	echo "   One-time setup is still required before Connect/Disconnect will work:"
-	echo "   see the 'One-time setup' section in the project README."
+	echo "   Launch it once - it will offer to complete one-time VPN permission setup"
+	echo "   automatically via a single system authentication prompt (pkexec), no"
+	echo "   manual file editing needed. See the README for details or a manual path."
 }
 
 post_upgrade() {
