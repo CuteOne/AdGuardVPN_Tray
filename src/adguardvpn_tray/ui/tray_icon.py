@@ -562,7 +562,13 @@ class TrayIcon(QSystemTrayIcon):
     # -- privilege setup -----------------------------------------------------
 
     def _check_privilege_setup(self) -> None:
-        if privilege_setup.is_configured():
+        self.runner.submit(
+            lambda: privilege_setup.is_configured(self.cli.binary_path),
+            on_finished=self._on_startup_privilege_check_result,
+        )
+
+    def _on_startup_privilege_check_result(self, configured: bool) -> None:
+        if configured:
             return
         reply = QMessageBox.question(
             None,
@@ -576,7 +582,13 @@ class TrayIcon(QSystemTrayIcon):
             self._run_privilege_setup()
 
     def _on_setup_permissions_clicked(self) -> None:
-        if privilege_setup.is_configured():
+        self.runner.submit(
+            lambda: privilege_setup.is_configured(self.cli.binary_path),
+            on_finished=self._on_manual_privilege_check_result,
+        )
+
+    def _on_manual_privilege_check_result(self, configured: bool) -> None:
+        if configured:
             QMessageBox.information(None, "VPN Permissions", "Already configured.")
             return
         self._run_privilege_setup()
