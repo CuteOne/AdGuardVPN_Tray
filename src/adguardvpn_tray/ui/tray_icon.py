@@ -10,11 +10,12 @@ from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.locations_parser import parse_locations
-from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup
+from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup, vpn_control
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.notifier import Notifier
 from adguardvpn_tray.services.poller import Poller
 from adguardvpn_tray.services.update_checker import UpdateChecker
+from adguardvpn_tray.services.vpn_control import DisconnectOutcome, StartupAction
 from adguardvpn_tray.ui import icons
 from adguardvpn_tray.ui.favorites_dialog import FavoritesDialog, location_key
 from adguardvpn_tray.ui.login_dialog import LoginDialog
@@ -36,11 +37,13 @@ class TrayIcon(QSystemTrayIcon):
         self._license = LicenseInfo(logged_in=False)
         self._license_checked = False
         self._optimistic: ConnectionState | None = None
+        self._optimistic_generation = 0
         self._locations = []
         self._locations_fetched_at = 0.0
         self._manual_update_check = False
         self._login_dialog = None
-        self._startup_autoconnect_pending = True
+        self._startup_check_pending = True
+        self._quit_cleanup_done = False
         self._was_connected = False
         self._reconnect_attempts = 0
         self._pending_connect_reason = "manual"
@@ -93,7 +96,7 @@ class TrayIcon(QSystemTrayIcon):
 
         menu.addSeparator()
         quit_action = menu.addAction("Quit")
-        quit_action.triggered.connect(QApplication.quit)
+        quit_action.triggered.connect(self._on_quit_clicked)
 
         self._menu = menu
 
@@ -121,6 +124,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def _build_settings_menu(self) -> QMenu:
         menu = QMenu("Settings")
+        menu.setToolTipsVisible(True)
 
         self._add_menu_header(menu, "Connection Behavior")
 
@@ -141,7 +145,10 @@ class TrayIcon(QSystemTrayIcon):
         else:
             self._target_fastest_action.setChecked(True)
 
-        self._autoconnect_launch_action = menu.addAction("Auto-connect on launch")
+        self._autoconnect_launch_action = menu.addAction("Connect automatically when the tray starts")
+        self._autoconnect_launch_action.setToolTip(
+            "Off by default. With autostart enabled, this connects the VPN at every login."
+        )
         self._autoconnect_launch_action.setCheckable(True)
         self._autoconnect_launch_action.setChecked(self.config.auto_connect_on_launch)
         self._autoconnect_launch_action.triggered.connect(self._on_autoconnect_launch_toggled)
@@ -162,6 +169,14 @@ class TrayIcon(QSystemTrayIcon):
         self._autostart_action.setCheckable(True)
         self._autostart_action.setChecked(autostart.is_enabled())
         self._autostart_action.triggered.connect(self._on_autostart_toggled)
+
+        self._disconnect_on_quit_action = menu.addAction("Disconnect VPN when quitting")
+        self._disconnect_on_quit_action.setToolTip(
+            "The VPN runs independently of the tray. Turn this off to keep it connected after the tray closes."
+        )
+        self._disconnect_on_quit_action.setCheckable(True)
+        self._disconnect_on_quit_action.setChecked(self.config.disconnect_on_quit)
+        self._disconnect_on_quit_action.triggered.connect(self._on_disconnect_on_quit_toggled)
 
         self._notifications_action = menu.addAction("Show notifications")
         self._notifications_action.setCheckable(True)
@@ -224,13 +239,20 @@ class TrayIcon(QSystemTrayIcon):
             return "Error — see status", "AdGuard VPN — Error"
         return "Checking status…", "AdGuard VPN — Checking status…"
 
-    def _set_optimistic(self, state: ConnectionState) -> None:
+    def _set_optimistic(self, state: ConnectionState, with_timeout: bool = True) -> None:
         self._optimistic = state
+        # Each optimistic state gets its own timeout - a stale timer from an earlier
+        # connect must not clobber a later action that is still in flight.
+        self._optimistic_generation += 1
         self._refresh_ui()
-        QTimer.singleShot(constants.OPTIMISTIC_STATE_TIMEOUT_S * 1000, self._on_optimistic_timeout)
+        if with_timeout:
+            generation = self._optimistic_generation
+            QTimer.singleShot(
+                constants.OPTIMISTIC_STATE_TIMEOUT_S * 1000, lambda: self._on_optimistic_timeout(generation)
+            )
 
-    def _on_optimistic_timeout(self) -> None:
-        if self._optimistic is not None:
+    def _on_optimistic_timeout(self, generation: int) -> None:
+        if self._optimistic is not None and generation == self._optimistic_generation:
             self._optimistic = None
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text="Timed out waiting for status")
             self.notifier.notify("AdGuard VPN", "Timed out waiting for a status update.")
@@ -248,9 +270,7 @@ class TrayIcon(QSystemTrayIcon):
             self._optimistic = None
             self.notifier.notify("AdGuard VPN", f"Connected to {status.location or 'VPN'}")
             self._maybe_verify_post_connect_ip()
-        elif previous_optimistic == ConnectionState.DISCONNECTING and status.state == ConnectionState.DISCONNECTED:
-            self._optimistic = None
-            self.notifier.notify("AdGuard VPN", "Disconnected")
+        # DISCONNECTING is resolved by _on_disconnect_result, which verifies the outcome.
 
         if status.state == ConnectionState.CONNECTED:
             self._was_connected = True
@@ -266,11 +286,33 @@ class TrayIcon(QSystemTrayIcon):
 
         self._refresh_ui()
 
-        if self._startup_autoconnect_pending and status.state != ConnectionState.UNKNOWN:
-            self._startup_autoconnect_pending = False
-            if self.config.auto_connect_on_launch and status.state == ConnectionState.DISCONNECTED:
-                fastest = self.config.default_connect_target == "fastest"
-                self._do_connect(fastest=fastest)
+        if self._startup_check_pending:
+            self._handle_startup_status(status)
+
+    def _handle_startup_status(self, status: ConnectionStatus) -> None:
+        action = vpn_control.startup_action(status, self.config.auto_connect_on_launch)
+        if action == StartupAction.UNDECIDED:
+            return
+        self._startup_check_pending = False
+        if action == StartupAction.CONNECT:
+            fastest = self.config.default_connect_target == "fastest"
+            self._do_connect(fastest=fastest)
+        elif action == StartupAction.ADOPT:
+            self.notifier.notify("AdGuard VPN", f"Already connected to {status.location or 'VPN'} — keeping that connection.")
+        elif action == StartupAction.OFFER_DISCONNECT:
+            self._offer_disconnect_existing(status)
+
+    def _offer_disconnect_existing(self, status: ConnectionStatus) -> None:
+        reply = QMessageBox.question(
+            None,
+            "VPN already connected",
+            f"AdGuard VPN is already connected to {status.location or 'a VPN location'}.\n\n"
+            "It was probably left running by an earlier session. Disconnect it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        # The dialog is modal but polling continues - only act if it's still connected.
+        if reply == QMessageBox.StandardButton.Yes and self._effective_state() == ConnectionState.CONNECTED:
+            self._do_disconnect()
 
     def _handle_unexpected_drop(self) -> None:
         if not self.config.auto_reconnect_on_drop:
@@ -355,6 +397,7 @@ class TrayIcon(QSystemTrayIcon):
             self._do_connect(fastest=fastest)
 
     def _do_connect(self, location: str | None = None, fastest: bool = False, reason: str = "manual") -> None:
+        self._startup_check_pending = False
         self._pending_connect_reason = reason
         self._set_optimistic(ConnectionState.CONNECTING)
         self.runner.submit(
@@ -385,22 +428,68 @@ class TrayIcon(QSystemTrayIcon):
             self.poller.force_repoll()
 
     def _do_disconnect(self) -> None:
-        self._set_optimistic(ConnectionState.DISCONNECTING)
-        self.runner.submit(self.cli.disconnect, on_finished=self._on_disconnect_result)
+        self._startup_check_pending = False
+        # No optimistic timeout: the worker is bounded and always reports back.
+        self._set_optimistic(ConnectionState.DISCONNECTING, with_timeout=False)
+        self.runner.submit(lambda: vpn_control.disconnect_and_verify(self.cli), on_finished=self._on_disconnect_result)
 
-    def _on_disconnect_result(self, result) -> None:
-        if result.binary_missing:
-            self._on_cli_missing()
-            return
-        if result.returncode != 0:
-            self._optimistic = None
-            message = strip_ansi(result.stderr or result.stdout).strip()
-            self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=message)
-            self.notifier.notify("AdGuard VPN", f"Disconnect failed: {message[:200]}")
-            error_reporter.report_error("disconnect_failed", message)
+    def _on_disconnect_result(self, outcome: DisconnectOutcome) -> None:
+        self._optimistic = None
+        if outcome.verified:
+            self._status = outcome.status
+            # Clear before the next poll sees DISCONNECTED, or it's mistaken for a drop.
+            self._was_connected = False
+            self.notifier.notify("AdGuard VPN", "Disconnected")
             self._refresh_ui()
+            return
+
+        if outcome.status.state == ConnectionState.CONNECTED:
+            self._status = outcome.status
         else:
-            self.poller.force_repoll()
+            self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=outcome.message)
+        error_reporter.report_error("disconnect_failed", outcome.message)
+        self._refresh_ui()
+        # A dialog rather than a notification: notifications can be turned off, and a
+        # silently-still-up VPN is exactly what this check exists to surface.
+        QMessageBox.warning(None, "Disconnect failed", outcome.message)
+
+    # -- quit ----------------------------------------------------------------
+
+    def _on_quit_clicked(self) -> None:
+        outcome = self._disconnect_for_quit()
+        if outcome is not None and not outcome.verified:
+            reply = QMessageBox.question(
+                None,
+                "VPN still connected",
+                f"{outcome.message}\n\nQuit anyway? The VPN will stay connected after the tray closes.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self._status = outcome.status
+                self._refresh_ui()
+                self.poller.start()
+                return
+        self._quit_cleanup_done = True
+        QApplication.quit()
+
+    def shutdown(self) -> None:
+        """Connected to QApplication.aboutToQuit - covers quits that skip the menu (SIGTERM at logout)."""
+        if self._quit_cleanup_done:
+            return
+        self._quit_cleanup_done = True
+        outcome = self._disconnect_for_quit()
+        if outcome is not None and not outcome.verified:
+            self.notifier.notify("AdGuard VPN", f"Tray closed but the VPN may still be up: {outcome.message}")
+
+    def _disconnect_for_quit(self) -> DisconnectOutcome | None:
+        # Runs on the GUI thread on purpose: quit must not return before it's done.
+        # Every step is time-bounded (see the TIMEOUT_QUIT_* constants).
+        self.poller.stop()
+        self.runner.wait_for_idle(constants.QUIT_WAIT_FOR_WORKERS_MS)  # let an in-flight connect land first
+        outcome = vpn_control.disconnect_for_quit(self.cli, self.config)
+        if outcome is not None and not outcome.verified:
+            error_reporter.report_error("quit_disconnect_failed", outcome.message)
+        return outcome
 
     # -- locations -----------------------------------------------------------
 
@@ -536,6 +625,10 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_autoconnect_launch_toggled(self, checked: bool) -> None:
         self.config.auto_connect_on_launch = checked
+        self.config.save()
+
+    def _on_disconnect_on_quit_toggled(self, checked: bool) -> None:
+        self.config.disconnect_on_quit = checked
         self.config.save()
 
     def _on_autoreconnect_drop_toggled(self, checked: bool) -> None:

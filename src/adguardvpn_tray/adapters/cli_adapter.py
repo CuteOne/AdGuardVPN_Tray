@@ -14,8 +14,8 @@ class CliAdapter:
     def __init__(self, binary_path: str | None = None):
         self.binary_path = binary_path or constants.DEFAULT_BINARY_PATH
 
-    def status(self) -> CliResult:
-        return self._run(["status"], timeout=constants.TIMEOUT_STATUS_S)
+    def status(self, timeout: int = constants.TIMEOUT_STATUS_S) -> CliResult:
+        return self._run(["status"], timeout=timeout)
 
     def license(self) -> CliResult:
         return self._run(["license"], timeout=constants.TIMEOUT_LICENSE_S)
@@ -40,8 +40,8 @@ class CliAdapter:
     def logout(self) -> CliResult:
         return self._run(["logout"], timeout=constants.TIMEOUT_LICENSE_S)
 
-    def disconnect(self) -> CliResult:
-        return self._run(["disconnect"], timeout=constants.TIMEOUT_DISCONNECT_S, needs_root=True)
+    def disconnect(self, timeout: int = constants.TIMEOUT_DISCONNECT_S) -> CliResult:
+        return self._run(["disconnect"], timeout=timeout, needs_root=True)
 
     def check_update(self) -> CliResult:
         return self._run(["check-update"], timeout=constants.TIMEOUT_UPDATE_S)

@@ -52,7 +52,8 @@ Or, after installing the package (`pip install -e .` in a venv, or via a future 
 
 **Settings** also includes:
 - **Default connect target** — Fastest or Last selected; controls what clicking Connect does, and what auto-connect/auto-reconnect use.
-- **Auto-connect on launch** (on by default) — if the VPN is disconnected when the app starts, connect automatically.
+- **Connect automatically when the tray starts** (off by default) — if the VPN is disconnected when the app starts, connect automatically. Combined with autostart, this connects at every login.
+- **Disconnect VPN when quitting** (on by default) — quitting the tray (from the menu, or systemd stopping it at logout) disconnects the VPN and confirms it went down. If it can't, you're told instead of the tray silently disappearing.
 - **Auto-reconnect if dropped** (on by default) — if the connection drops unexpectedly (not from you clicking Disconnect), the app retries up to 3 times with a short delay before giving up and notifying you.
 - **Verify IP after connecting** (on by default) — after connecting, confirms your public IP actually changed before trusting "Connected", retrying a few times to tolerate route-settling delay.
 - **Advanced settings…** — refresh interval, CLI binary path override, a read-only CLI config viewer, and a **Diagnostics** tab showing a local error log (view/clear) for troubleshooting.
@@ -73,6 +74,7 @@ This builds and installs `adguardvpn-tray` as a proper package (binary on `PATH`
 ## Notes
 
 - Only `connect`/`disconnect` run elevated (via the sudoers rule above); `status`, `license`, `list-locations`, and `config show` run as your normal user.
-- Quitting the tray app does **not** disconnect the VPN — `adguardvpn-cli` backgrounds its own tunnel process independent of the tray app's lifetime.
+- `adguardvpn-cli` backgrounds its own tunnel process (as root) that is independent of the tray app's lifetime — that's why **Disconnect VPN when quitting** exists. If the tray starts and finds a connection left over from an earlier session, it shows it and offers to disconnect it rather than starting a second one.
+- Disconnect is only reported as successful once `adguardvpn-cli status` confirms the VPN is down.
 - Site-exclusion (split tunneling) management is not yet implemented — see the Advanced Settings dialog's placeholder tab.
 - The in-app login flow drives `adguardvpn-cli login` through a pseudo-terminal and extracts the browser sign-in link automatically. It hasn't been exercised against a real logout/login cycle during development (doing so would have logged out the developer's real account) — if it doesn't behave as expected, the dialog always shows the raw sign-in link with a **Copy Link** button as a manual fallback.

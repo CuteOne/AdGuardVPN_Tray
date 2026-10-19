@@ -16,7 +16,8 @@ class AppConfig:
     refresh_interval_s: int = constants.POLL_INTERVAL_S
     autostart_enabled: bool = False
     default_connect_target: str = "fastest"  # "fastest" | "last"
-    auto_connect_on_launch: bool = True
+    auto_connect_on_launch: bool = False
+    disconnect_on_quit: bool = True
     auto_reconnect_on_drop: bool = True
     verify_ip_on_connect: bool = True
     binary_path_override: str | None = None

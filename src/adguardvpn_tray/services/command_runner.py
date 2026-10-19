@@ -41,3 +41,6 @@ class CommandRunner:
             worker.signals.error.connect(on_error)
         self.pool.start(worker)
         return worker
+
+    def wait_for_idle(self, timeout_ms: int) -> bool:
+        return self.pool.waitForDone(timeout_ms)

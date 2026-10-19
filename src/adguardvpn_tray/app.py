@@ -1,9 +1,12 @@
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
+from adguardvpn_tray import constants
 from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import ConnectionState
+from adguardvpn_tray.services import shutdown
 from adguardvpn_tray.ui import icons
 from adguardvpn_tray.ui.tray_icon import TrayIcon
 
@@ -21,7 +24,15 @@ def main() -> int:
         return 1
 
     config = AppConfig.load()
-    tray = TrayIcon(config)  # noqa: F841 - keep a live reference for the app's lifetime
+    tray = TrayIcon(config)
+    app.aboutToQuit.connect(tray.shutdown)
+
+    shutdown.install_quit_signal_handlers(app.quit)
+    # Python only runs signal handlers once Qt's C++ event loop hands control back,
+    # so wake the interpreter periodically or a SIGTERM would sit unhandled.
+    signal_wakeup = QTimer()
+    signal_wakeup.timeout.connect(lambda: None)
+    signal_wakeup.start(constants.SIGNAL_CHECK_INTERVAL_MS)
 
     return app.exec()
 

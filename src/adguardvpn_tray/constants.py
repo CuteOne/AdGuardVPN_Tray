@@ -10,6 +10,18 @@ TIMEOUT_CONNECT_S = 45
 TIMEOUT_DISCONNECT_S = 30
 TIMEOUT_UPDATE_S = 120
 
+# A disconnect is only trusted once `status` confirms the VPN is down.
+DISCONNECT_VERIFY_ATTEMPTS = 5
+DISCONNECT_VERIFY_DELAY_S = 1
+
+# Disconnect-on-quit must never hang shutdown (systemd SIGKILLs a stuck unit at logout).
+# Worst case: wait for workers + status + disconnect + 2 verify statuses + 1 delay ≈ 20 s.
+TIMEOUT_QUIT_STATUS_S = 3
+TIMEOUT_QUIT_DISCONNECT_S = 8
+QUIT_DISCONNECT_VERIFY_ATTEMPTS = 2
+QUIT_WAIT_FOR_WORKERS_MS = 2000
+SIGNAL_CHECK_INTERVAL_MS = 500
+
 POLL_INTERVAL_S = 6
 LICENSE_POLL_EVERY_N_TICKS = 6
 FORCE_REPOLL_MIN_MS = 1500
