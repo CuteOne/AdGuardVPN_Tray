@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QActionGroup
@@ -10,10 +11,11 @@ from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.locations_parser import parse_locations
-from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup, vpn_control
+from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup, status_report, vpn_control
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.notifier import Notifier
 from adguardvpn_tray.services.poller import Poller
+from adguardvpn_tray.services.status_report import DETAILS_HINT, ErrorRecord, StatusSnapshot
 from adguardvpn_tray.services.update_checker import UpdateChecker
 from adguardvpn_tray.services.vpn_control import DisconnectOutcome, StartupAction
 from adguardvpn_tray.ui import icons
@@ -21,6 +23,7 @@ from adguardvpn_tray.ui.favorites_dialog import FavoritesDialog, location_key
 from adguardvpn_tray.ui.login_dialog import LoginDialog
 from adguardvpn_tray.ui.region_map import CONTINENT_ORDER, continent_for
 from adguardvpn_tray.ui.settings_dialog import SettingsDialog
+from adguardvpn_tray.ui.status_dialog import StatusDetailsDialog
 
 
 class TrayIcon(QSystemTrayIcon):
@@ -49,6 +52,11 @@ class TrayIcon(QSystemTrayIcon):
         self._pending_connect_reason = "manual"
         self._baseline_ip: str | None = None
         self._ip_verify_attempts = 0
+        self._last_status_at: datetime | None = None
+        self._last_error: ErrorRecord | None = None
+        self._public_ip: str | None = None
+        self._public_ip_at: datetime | None = None
+        self._status_dialog: StatusDetailsDialog | None = None
 
         self._build_menu()
         self.setContextMenu(self._menu)
@@ -72,6 +80,8 @@ class TrayIcon(QSystemTrayIcon):
 
         self._status_action = menu.addAction("Checking status…")
         self._status_action.setEnabled(False)
+        status_details_action = menu.addAction("Status details…")
+        status_details_action.triggered.connect(self._open_status_details)
         menu.addSeparator()
 
         self._primary_action = menu.addAction("Connect")
@@ -187,7 +197,7 @@ class TrayIcon(QSystemTrayIcon):
         setup_permissions_action = menu.addAction("Set up VPN permissions…")
         setup_permissions_action.triggered.connect(self._on_setup_permissions_clicked)
         advanced_action = menu.addAction("Advanced settings…")
-        advanced_action.triggered.connect(self._open_settings_dialog)
+        advanced_action.triggered.connect(lambda: self._open_settings_dialog())
 
         return menu
 
@@ -222,6 +232,7 @@ class TrayIcon(QSystemTrayIcon):
             self._primary_action.setEnabled(True)
 
         self._refresh_account_menu()
+        self._update_status_dialog()
 
     def _status_text(self, state: ConnectionState) -> tuple[str, str]:
         if state == ConnectionState.CONNECTED:
@@ -236,7 +247,8 @@ class TrayIcon(QSystemTrayIcon):
         if state == ConnectionState.NOT_LOGGED_IN:
             return "Not logged in", "AdGuard VPN — Not logged in"
         if state == ConnectionState.ERROR:
-            return "Error — see status", "AdGuard VPN — Error"
+            reason = status_report.short_reason(self._status.raw_text)
+            return f"Error: {reason}", f"AdGuard VPN — Error: {reason}"
         return "Checking status…", "AdGuard VPN — Checking status…"
 
     def _set_optimistic(self, state: ConnectionState, with_timeout: bool = True) -> None:
@@ -255,8 +267,8 @@ class TrayIcon(QSystemTrayIcon):
         if self._optimistic is not None and generation == self._optimistic_generation:
             self._optimistic = None
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text="Timed out waiting for status")
-            self.notifier.notify("AdGuard VPN", "Timed out waiting for a status update.")
-            error_reporter.report_error("status_timeout", "Timed out waiting for a status update after connect/disconnect.")
+            self.notifier.notify("AdGuard VPN", f"Timed out waiting for a status update. {DETAILS_HINT}")
+            self._record_error("status_timeout", "Timed out waiting for a status update after connect/disconnect.")
             self._refresh_ui()
 
     # -- poller callbacks ----------------------------------------------------
@@ -265,6 +277,10 @@ class TrayIcon(QSystemTrayIcon):
         previous_optimistic = self._optimistic
         was_connected = self._was_connected
         self._status = status
+        self._last_status_at = datetime.now()
+        if status.state == ConnectionState.ERROR:
+            # Not written to the error log: polls repeat every few seconds and would flood it.
+            self._last_error = ErrorRecord(self._last_status_at, "status", status.raw_text or "Couldn't read VPN status")
 
         if previous_optimistic == ConnectionState.CONNECTING and status.state == ConnectionState.CONNECTED:
             self._optimistic = None
@@ -341,6 +357,12 @@ class TrayIcon(QSystemTrayIcon):
     def _on_baseline_ip_result(self, ip: str | None) -> None:
         if ip:
             self._baseline_ip = ip
+            self._note_public_ip(ip)
+
+    def _note_public_ip(self, ip: str) -> None:
+        self._public_ip = ip
+        self._public_ip_at = datetime.now()
+        self._update_status_dialog()
 
     def _maybe_verify_post_connect_ip(self) -> None:
         if not self.config.verify_ip_on_connect or not self._baseline_ip:
@@ -356,6 +378,8 @@ class TrayIcon(QSystemTrayIcon):
         self.runner.submit(ip_checker.get_public_ip, on_finished=self._on_post_connect_ip_result)
 
     def _on_post_connect_ip_result(self, ip: str | None) -> None:
+        if ip:
+            self._note_public_ip(ip)
         if not ip or ip != self._baseline_ip:
             return  # changed (or check failed) - nothing to report either way
 
@@ -366,8 +390,8 @@ class TrayIcon(QSystemTrayIcon):
             return
 
         message = f"Connected, but your public IP ({ip}) hasn't changed — traffic may not be routed through the VPN."
-        self.notifier.notify("AdGuard VPN", message)
-        error_reporter.report_error("ip_verify_mismatch", message)
+        self.notifier.notify("AdGuard VPN", f"{message} {DETAILS_HINT}")
+        self._record_error("ip_verify_mismatch", message)
 
     def _on_license_updated(self, info: LicenseInfo) -> None:
         self._license = info
@@ -379,7 +403,7 @@ class TrayIcon(QSystemTrayIcon):
         self._status_action.setText("adguardvpn-cli not found on PATH")
         self.setIcon(icons.icon_for_state(ConnectionState.ERROR))
         self._primary_action.setEnabled(False)
-        error_reporter.report_error("cli_missing", "adguardvpn-cli not found on PATH")
+        self._record_error("cli_missing", "adguardvpn-cli not found on PATH")
 
     # -- connect / disconnect -------------------------------------------------
     # Note: left-click on the tray icon is intentionally not wired to any action -
@@ -418,11 +442,11 @@ class TrayIcon(QSystemTrayIcon):
                 return
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=message)
             if reason == "auto_reconnect":
-                self.notifier.notify("AdGuard VPN", "Auto-reconnect gave up after repeated failures.")
-                error_reporter.report_error("auto_reconnect_failed", message)
+                self.notifier.notify("AdGuard VPN", f"Auto-reconnect gave up after repeated failures. {DETAILS_HINT}")
+                self._record_error("auto_reconnect_failed", message)
             else:
-                self.notifier.notify("AdGuard VPN", f"Connect failed: {message[:200]}")
-                error_reporter.report_error("connect_failed", message)
+                self.notifier.notify("AdGuard VPN", f"Connect failed: {status_report.short_reason(message)} {DETAILS_HINT}")
+                self._record_error("connect_failed", message)
             self._refresh_ui()
         else:
             self.poller.force_repoll()
@@ -447,7 +471,7 @@ class TrayIcon(QSystemTrayIcon):
             self._status = outcome.status
         else:
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=outcome.message)
-        error_reporter.report_error("disconnect_failed", outcome.message)
+        self._record_error("disconnect_failed", outcome.message)
         self._refresh_ui()
         # A dialog rather than a notification: notifications can be turned off, and a
         # silently-still-up VPN is exactly what this check exists to surface.
@@ -488,7 +512,7 @@ class TrayIcon(QSystemTrayIcon):
         self.runner.wait_for_idle(constants.QUIT_WAIT_FOR_WORKERS_MS)  # let an in-flight connect land first
         outcome = vpn_control.disconnect_for_quit(self.cli, self.config)
         if outcome is not None and not outcome.verified:
-            error_reporter.report_error("quit_disconnect_failed", outcome.message)
+            self._record_error("quit_disconnect_failed", outcome.message)
         return outcome
 
     # -- locations -----------------------------------------------------------
@@ -648,9 +672,52 @@ class TrayIcon(QSystemTrayIcon):
         self.config.show_notifications = checked
         self.config.save()
 
-    def _open_settings_dialog(self) -> None:
-        dialog = SettingsDialog(self.config, self.cli, on_refresh_interval_changed=self.poller.set_interval)
+    def _open_settings_dialog(self, show_diagnostics: bool = False) -> None:
+        dialog = SettingsDialog(
+            self.config,
+            self.cli,
+            on_refresh_interval_changed=self.poller.set_interval,
+            show_diagnostics=show_diagnostics,
+        )
         dialog.exec()
+
+    # -- status details --------------------------------------------------------
+
+    def _open_status_details(self) -> None:
+        # Non-modal and refreshed on every poll, so it can stay open to watch a drop happen.
+        if self._status_dialog is None:
+            self._status_dialog = StatusDetailsDialog(on_open_diagnostics=lambda: self._open_settings_dialog(True))
+            self._status_dialog.finished.connect(self._on_status_dialog_finished)
+            self._update_status_dialog()
+        self._status_dialog.show()
+        self._status_dialog.raise_()
+        self._status_dialog.activateWindow()
+
+    def _on_status_dialog_finished(self, _result) -> None:
+        self._status_dialog = None
+
+    def _update_status_dialog(self) -> None:
+        if self._status_dialog is not None:
+            self._status_dialog.update_snapshot(self._status_snapshot())
+
+    def _status_snapshot(self) -> StatusSnapshot:
+        summary, _tooltip = self._status_text(self._effective_state())
+        return StatusSnapshot(
+            summary=summary,
+            status=self._status,
+            refresh_interval_s=self.config.refresh_interval_s,
+            binary_path=self.cli.binary_path,
+            last_check_at=self._last_status_at,
+            last_error=self._last_error,
+            public_ip=self._public_ip,
+            public_ip_at=self._public_ip_at,
+            ip_checks_enabled=self.config.verify_ip_on_connect,
+            license=self._license if self._license_checked else None,
+        )
+
+    def _record_error(self, context: str, message: str) -> None:
+        self._last_error = ErrorRecord(datetime.now(), context, message)
+        error_reporter.report_error(context, message)
 
     # -- privilege setup -----------------------------------------------------
 
@@ -698,7 +765,7 @@ class TrayIcon(QSystemTrayIcon):
             self.notifier.notify("AdGuard VPN", message)
         else:
             QMessageBox.warning(None, "Setup failed", message)
-            error_reporter.report_error("privilege_setup_failed", message)
+            self._record_error("privilege_setup_failed", message)
 
     def _show_about(self) -> None:
         QMessageBox.about(
@@ -736,6 +803,6 @@ class TrayIcon(QSystemTrayIcon):
         if success:
             self.notifier.notify("AdGuard VPN", "CLI updated successfully.")
         else:
-            self.notifier.notify("AdGuard VPN", f"Update failed: {message[:200]}")
-            error_reporter.report_error("update_failed", message)
+            self.notifier.notify("AdGuard VPN", f"Update failed: {status_report.short_reason(message)} {DETAILS_HINT}")
+            self._record_error("update_failed", message)
         self.poller.force_repoll()

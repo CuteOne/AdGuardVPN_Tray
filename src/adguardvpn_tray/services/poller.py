@@ -5,7 +5,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from adguardvpn_tray import constants
 from adguardvpn_tray.adapters.cli_adapter import CliAdapter
 from adguardvpn_tray.parsers.license_parser import parse_license
-from adguardvpn_tray.parsers.status_parser import parse_status
+from adguardvpn_tray.services import vpn_control
 from adguardvpn_tray.services.command_runner import CommandRunner
 
 
@@ -55,8 +55,9 @@ class Poller(QObject):
         if result.binary_missing:
             self.cli_missing.emit()
             return
-        status = parse_status(result.stdout, result.returncode)
-        self.status_updated.emit(status)
+        # Shared with vpn_control so a timed-out poll reads as "Timed out reading VPN
+        # status" rather than whatever partial output arrived before the timeout.
+        self.status_updated.emit(vpn_control.status_from_result(result))
 
     def _poll_license(self) -> None:
         self._runner.submit(self._cli.license, on_finished=self._on_license_result)

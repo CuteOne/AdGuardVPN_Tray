@@ -20,7 +20,9 @@ from adguardvpn_tray.services import error_reporter
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config: AppConfig, cli: CliAdapter, on_refresh_interval_changed=None, parent=None):
+    def __init__(
+        self, config: AppConfig, cli: CliAdapter, on_refresh_interval_changed=None, show_diagnostics=False, parent=None
+    ):
         super().__init__(parent)
         self.setWindowTitle("Advanced Settings")
         self.setMinimumWidth(480)
@@ -31,8 +33,10 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_general_tab(), "General")
         tabs.addTab(self._build_config_tab(), "CLI Configuration")
-        tabs.addTab(self._build_diagnostics_tab(), "Diagnostics")
+        diagnostics_index = tabs.addTab(self._build_diagnostics_tab(), "Diagnostics")
         tabs.addTab(self._build_exclusions_tab(), "Site Exclusions")
+        if show_diagnostics:
+            tabs.setCurrentIndex(diagnostics_index)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)

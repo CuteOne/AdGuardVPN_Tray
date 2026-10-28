@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 from PySide6.QtCore import QCoreApplication
 
 from adguardvpn_tray.adapters.cli_adapter import CliAdapter
-from adguardvpn_tray.models.types import CliResult
+from adguardvpn_tray.models.types import CliResult, ConnectionState
 from adguardvpn_tray.services import autostart, single_instance
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.poller import Poller
@@ -62,6 +62,16 @@ class LicensePollTests(unittest.TestCase):
         self.poller._on_license_result(CliResult(stdout=stdout, stderr="", returncode=0))
         self.assertEqual(len(self.updates), 1)
         self.assertTrue(self.updates[0].logged_in)
+
+
+class StatusPollTests(unittest.TestCase):
+    def test_timed_out_poll_reports_why(self):
+        poller = Poller(mock.create_autospec(CliAdapter, instance=True), mock.create_autospec(CommandRunner, instance=True), 6)
+        statuses = []
+        poller.status_updated.connect(statuses.append)
+        poller._on_status_result(CliResult(stdout="Conn", stderr="", returncode=-1, timed_out=True))
+        self.assertEqual(statuses[0].state, ConnectionState.ERROR)
+        self.assertEqual(statuses[0].raw_text, "Timed out reading VPN status")
 
 
 class AutostartTests(unittest.TestCase):

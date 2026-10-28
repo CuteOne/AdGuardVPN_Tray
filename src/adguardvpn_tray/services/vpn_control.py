@@ -40,7 +40,10 @@ def startup_action(status: ConnectionStatus, auto_connect_on_launch: bool) -> St
 
 
 def read_status(cli: CliAdapter, timeout_s: int) -> ConnectionStatus:
-    result = cli.status(timeout=timeout_s)
+    return status_from_result(cli.status(timeout=timeout_s))
+
+
+def status_from_result(result: CliResult) -> ConnectionStatus:
     if result.binary_missing:
         return ConnectionStatus(state=ConnectionState.ERROR, raw_text=_CLI_MISSING)
     if result.timed_out:
