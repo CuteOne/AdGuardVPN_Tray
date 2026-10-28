@@ -24,6 +24,8 @@ class AppConfig:
     show_notifications: bool = True
     last_update_check_iso: str | None = None
     favorite_locations: list[str] = field(default_factory=list)
+    gaming_mode_enabled: bool = False
+    gaming_programs: list[str] = field(default_factory=list)  # glob patterns, matched case-insensitively
 
     def save(self) -> None:
         path = config_path()

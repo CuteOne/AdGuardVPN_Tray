@@ -10,6 +10,7 @@ TIMEOUT_LOCATIONS_S = 15
 TIMEOUT_CONNECT_S = 45
 TIMEOUT_DISCONNECT_S = 30
 TIMEOUT_UPDATE_S = 120
+TIMEOUT_EXCLUSIONS_APPLY_S = 30  # includes the CLI re-applying settings to a live tunnel
 
 # A disconnect is only trusted once `status` confirms the VPN is down.
 DISCONNECT_VERIFY_ATTEMPTS = 5
@@ -39,7 +40,9 @@ AUTO_RECONNECT_RETRY_DELAY_MS = 4000
 IP_VERIFY_SETTLE_DELAY_MS = 3000
 IP_VERIFY_MAX_ATTEMPTS = 4
 
-APP_CONFIG_DIR = "adguardvpn-tray"
+GAME_SCAN_INTERVAL_S = 5
+
+APP_CONFIG_DIR ="adguardvpn-tray"
 AUTOSTART_DESKTOP_FILENAME = "adguardvpn-tray.desktop"
 
 ICONS_DIR = Path(__file__).resolve().parent / "resources" / "icons"

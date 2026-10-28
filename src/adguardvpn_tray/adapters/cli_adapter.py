@@ -55,6 +55,27 @@ class CliAdapter:
     def update(self) -> CliResult:
         return self._run(["update", "-y"], timeout=constants.TIMEOUT_UPDATE_S, needs_root=True)
 
+    # Exclusions live in the user's config and need no root; a change to the active
+    # list is applied to a running tunnel straight away by the CLI itself.
+    def exclusions_show(self, mode: str) -> CliResult:
+        return self._run(["site-exclusions", "show", "--for-mode", mode], timeout=constants.TIMEOUT_CONFIG_S)
+
+    def exclusions_add(self, entries: list[str], mode: str) -> CliResult:
+        return self._run(
+            ["site-exclusions", "add", *entries, "--for-mode", mode], timeout=constants.TIMEOUT_EXCLUSIONS_APPLY_S
+        )
+
+    def exclusions_remove(self, entries: list[str], mode: str) -> CliResult:
+        return self._run(
+            ["site-exclusions", "remove", *entries, "--for-mode", mode], timeout=constants.TIMEOUT_EXCLUSIONS_APPLY_S
+        )
+
+    def exclusion_mode(self) -> CliResult:
+        return self._run(["site-exclusions", "mode"], timeout=constants.TIMEOUT_CONFIG_S)
+
+    def set_exclusion_mode(self, mode: str) -> CliResult:
+        return self._run(["site-exclusions", "mode", mode], timeout=constants.TIMEOUT_EXCLUSIONS_APPLY_S)
+
     def _run(self, args: list[str], *, timeout: int, needs_root: bool = False) -> CliResult:
         resolved = self.binary_path if os.sep in self.binary_path else shutil.which(self.binary_path)
         if not resolved or not os.access(resolved, os.X_OK):

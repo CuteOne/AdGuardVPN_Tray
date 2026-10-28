@@ -3,7 +3,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
@@ -34,7 +33,6 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_general_tab(), "General")
         tabs.addTab(self._build_config_tab(), "CLI Configuration")
         diagnostics_index = tabs.addTab(self._build_diagnostics_tab(), "Diagnostics")
-        tabs.addTab(self._build_exclusions_tab(), "Site Exclusions")
         if show_diagnostics:
             tabs.setCurrentIndex(diagnostics_index)
 
@@ -102,15 +100,6 @@ class SettingsDialog(QDialog):
     def _on_clear_error_log(self) -> None:
         error_reporter.clear_log()
         self._reload_error_log()
-
-    def _build_exclusions_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        label = QLabel("Site exclusions (split tunneling) management is coming in a future version.")
-        label.setWordWrap(True)
-        label.setEnabled(False)
-        layout.addWidget(label)
-        return widget
 
     def _on_refresh_changed(self, value: int) -> None:
         self._config.refresh_interval_s = value

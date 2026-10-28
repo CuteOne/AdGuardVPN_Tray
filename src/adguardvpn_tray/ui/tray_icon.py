@@ -11,8 +11,19 @@ from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import TUNNEL_UP_STATES, ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.locations_parser import parse_locations
-from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup, status_report, vpn_control
+from adguardvpn_tray.services import (
+    autostart,
+    error_reporter,
+    exclusions,
+    gaming_mode,
+    ip_checker,
+    privilege_setup,
+    status_report,
+    vpn_control,
+)
 from adguardvpn_tray.services.command_runner import CommandRunner
+from adguardvpn_tray.services.exclusions import ExclusionsState
+from adguardvpn_tray.services.gaming_mode import GameWatcher, GamingAction
 from adguardvpn_tray.services.notifier import Notifier
 from adguardvpn_tray.services.poller import Poller
 from adguardvpn_tray.services.privilege_setup import SetupState
@@ -20,7 +31,9 @@ from adguardvpn_tray.services.status_report import DETAILS_HINT, ErrorRecord, St
 from adguardvpn_tray.services.update_checker import UpdateChecker
 from adguardvpn_tray.services.vpn_control import DisconnectOutcome, StartupAction
 from adguardvpn_tray.ui import icons
+from adguardvpn_tray.ui.exclusions_dialog import ExclusionsDialog
 from adguardvpn_tray.ui.favorites_dialog import FavoritesDialog, location_key
+from adguardvpn_tray.ui.gaming_mode_dialog import GamingModeDialog
 from adguardvpn_tray.ui.login_dialog import LoginDialog
 from adguardvpn_tray.ui.region_map import CONTINENT_ORDER, continent_for
 from adguardvpn_tray.ui.settings_dialog import SettingsDialog
@@ -36,6 +49,9 @@ class TrayIcon(QSystemTrayIcon):
         self.poller = Poller(self.cli, self.runner, config.refresh_interval_s)
         self.update_checker = UpdateChecker(self.cli, self.runner, config)
         self.notifier = Notifier(self, lambda: self.config.show_notifications)
+        self.game_watcher = GameWatcher(
+            lambda: self.config.gaming_programs if self.config.gaming_mode_enabled else [], self
+        )
 
         self._status = ConnectionStatus(state=ConnectionState.UNKNOWN)
         self._license = LicenseInfo(logged_in=False)
@@ -58,6 +74,12 @@ class TrayIcon(QSystemTrayIcon):
         self._public_ip: str | None = None
         self._public_ip_at: datetime | None = None
         self._status_dialog: StatusDetailsDialog | None = None
+        self._pending_disconnect_reason = "manual"
+        self._running_games: list[str] = []
+        self._paused_for_game = False
+        self._resume_location: str | None = None  # None resumes with the default connect target
+        self._game_override = False  # connected by hand during a game - leave it until the games close
+        self._exclusions_busy = False
 
         self._build_menu()
         self.setContextMenu(self._menu)
@@ -67,11 +89,13 @@ class TrayIcon(QSystemTrayIcon):
         self.poller.cli_missing.connect(self._on_cli_missing)
         self.update_checker.check_finished.connect(self._on_check_finished)
         self.update_checker.update_finished.connect(self._on_update_finished)
+        self.game_watcher.games_changed.connect(self._on_games_changed)
 
         self._refresh_ui()
         self.show()
         self.poller.start()
         self.update_checker.start()
+        self.game_watcher.start()
         self._check_privilege_setup()
 
     # -- menu construction -------------------------------------------------
@@ -91,6 +115,11 @@ class TrayIcon(QSystemTrayIcon):
         self._locations_menu = QMenu("Locations")
         self._locations_menu.aboutToShow.connect(self._on_locations_menu_about_to_show)
         menu.addMenu(self._locations_menu)
+
+        self._gaming_action = menu.addAction("Gaming mode")
+        self._gaming_action.setCheckable(True)
+        self._gaming_action.setChecked(self.config.gaming_mode_enabled)
+        self._gaming_action.triggered.connect(self._on_gaming_mode_toggled)
 
         self._account_menu = self._build_account_menu()
         menu.addMenu(self._account_menu)
@@ -194,6 +223,15 @@ class TrayIcon(QSystemTrayIcon):
         self._notifications_action.setChecked(self.config.show_notifications)
         self._notifications_action.triggered.connect(self._on_notifications_toggled)
 
+        self._add_menu_header(menu, "Split Tunneling")
+
+        exceptions_action = menu.addAction("Exceptions…")
+        exceptions_action.setToolTip("Sites and IPs that skip the VPN, or the only ones that use it.")
+        exceptions_action.triggered.connect(self._open_exclusions_dialog)
+        gaming_programs_action = menu.addAction("Gaming mode programs…")
+        gaming_programs_action.setToolTip("Programs that pause the VPN while they run.")
+        gaming_programs_action.triggered.connect(self._open_gaming_mode_dialog)
+
         menu.addSeparator()
         setup_permissions_action = menu.addAction("Set up VPN permissions…")
         setup_permissions_action.triggered.connect(self._on_setup_permissions_clicked)
@@ -249,6 +287,9 @@ class TrayIcon(QSystemTrayIcon):
             return "Connecting…", "AdGuard VPN — Connecting…"
         if state == ConnectionState.DISCONNECTING:
             return "Disconnecting…", "AdGuard VPN — Disconnecting…"
+        if state == ConnectionState.DISCONNECTED and self._paused_for_game:
+            games = ", ".join(self._running_games) or "a game"
+            return f"Paused for gaming: {games}", f"AdGuard VPN — Paused while {games} runs"
         if state == ConnectionState.DISCONNECTED:
             return "Disconnected", "AdGuard VPN — Disconnected"
         if state == ConnectionState.NOT_LOGGED_IN:
@@ -311,10 +352,16 @@ class TrayIcon(QSystemTrayIcon):
             if unexpected_drop:
                 self._handle_unexpected_drop()
 
+        if self._paused_for_game and self._optimistic is None and status.state in TUNNEL_UP_STATES:
+            # Connected from outside the tray (e.g. the CLI) while paused - treat it like a manual connect.
+            self._paused_for_game = False
+            self._game_override = bool(self._running_games)
+
         self._refresh_ui()
 
         if self._startup_check_pending:
             self._handle_startup_status(status)
+        self._apply_gaming_mode()
 
     def _handle_startup_status(self, status: ConnectionStatus) -> None:
         action = vpn_control.startup_action(status, self.config.auto_connect_on_launch)
@@ -433,6 +480,9 @@ class TrayIcon(QSystemTrayIcon):
 
     def _do_connect(self, location: str | None = None, fastest: bool = False, reason: str = "manual") -> None:
         self._startup_check_pending = False
+        if reason == "manual":
+            self._paused_for_game = False
+            self._game_override = bool(self._running_games)
         self._pending_connect_reason = reason
         self._set_optimistic(ConnectionState.CONNECTING)
         self.runner.submit(
@@ -462,21 +512,31 @@ class TrayIcon(QSystemTrayIcon):
         else:
             self.poller.force_repoll()
 
-    def _do_disconnect(self) -> None:
+    def _do_disconnect(self, reason: str = "manual") -> None:
         self._startup_check_pending = False
+        self._pending_disconnect_reason = reason
         # No optimistic timeout: the worker is bounded and always reports back.
         self._set_optimistic(ConnectionState.DISCONNECTING, with_timeout=False)
         self.runner.submit(lambda: vpn_control.disconnect_and_verify(self.cli), on_finished=self._on_disconnect_result)
 
     def _on_disconnect_result(self, outcome: DisconnectOutcome) -> None:
         self._optimistic = None
+        for_game = self._pending_disconnect_reason == "gaming"
         if outcome.verified:
             self._status = outcome.status
             # Clear before the next poll sees DISCONNECTED, or it's mistaken for a drop.
             self._was_connected = False
-            self.notifier.notify("AdGuard VPN", "Disconnected")
+            if for_game:
+                games = ", ".join(self._running_games) or "your game"
+                self.notifier.notify("AdGuard VPN", f"VPN paused while {games} runs. It reconnects when you close it.")
+            else:
+                self.notifier.notify("AdGuard VPN", "Disconnected")
             self._refresh_ui()
+            self._apply_gaming_mode()  # the game may have closed while the disconnect ran
             return
+
+        if for_game:
+            self._paused_for_game = False
 
         if outcome.status.state in TUNNEL_UP_STATES:
             self._status = outcome.status
@@ -520,11 +580,102 @@ class TrayIcon(QSystemTrayIcon):
         # Runs on the GUI thread on purpose: quit must not return before it's done.
         # Every step is time-bounded (see the TIMEOUT_QUIT_* constants).
         self.poller.stop()
+        self.game_watcher.stop()
         self.runner.wait_for_idle(constants.QUIT_WAIT_FOR_WORKERS_MS)  # let an in-flight connect land first
         outcome = vpn_control.disconnect_for_quit(self.cli, self.config)
         if outcome is not None and not outcome.verified:
             self._record_error("quit_disconnect_failed", outcome.message)
         return outcome
+
+    # -- gaming mode -----------------------------------------------------------
+
+    def _on_games_changed(self, games: list[str]) -> None:
+        self._running_games = games
+        if not games:
+            self._game_override = False
+        self._refresh_ui()
+        self._apply_gaming_mode()
+
+    def _apply_gaming_mode(self) -> None:
+        action = gaming_mode.decide(
+            enabled=self.config.gaming_mode_enabled,
+            games_running=bool(self._running_games),
+            state=self._effective_state(),
+            paused=self._paused_for_game,
+            override=self._game_override,
+            busy=self._optimistic is not None or self._startup_check_pending,
+        )
+        if action == GamingAction.PAUSE:
+            self._paused_for_game = True
+            self._resume_location = self._status.location
+            self._do_disconnect(reason="gaming")
+        elif action == GamingAction.RESUME:
+            self._paused_for_game = False
+            location = self._resume_location_name()
+            self._do_connect(location=location, fastest=location is None, reason="gaming_resume")
+
+    def _resume_location_name(self) -> str | None:
+        # `status` prints the city in capitals ("NEW YORK"); connect with the
+        # list-locations spelling when it's known.
+        location = self._resume_location
+        if not location:
+            return None
+        for loc in self._locations:
+            if loc.city.casefold() == location.casefold():
+                return loc.city
+        return location
+
+    def _on_gaming_mode_toggled(self, checked: bool) -> None:
+        if checked and not self.config.gaming_programs:
+            self._gaming_action.setChecked(False)
+            self._open_gaming_mode_dialog(enable=True)
+            return
+        self._set_gaming_mode(checked, self.config.gaming_programs)
+
+    def _open_gaming_mode_dialog(self, enable: bool = False) -> None:
+        dialog = GamingModeDialog(enable or self.config.gaming_mode_enabled, self.config.gaming_programs)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._set_gaming_mode(dialog.is_enabled(), dialog.programs())
+
+    def _set_gaming_mode(self, enabled: bool, programs: list[str]) -> None:
+        self.config.gaming_mode_enabled = enabled
+        self.config.gaming_programs = programs
+        self.config.save()
+        self._gaming_action.setChecked(enabled)
+        self.game_watcher.scan_now()  # emits games_changed, which pauses or resumes as needed
+        self._apply_gaming_mode()
+
+    # -- exceptions ------------------------------------------------------------
+
+    def _open_exclusions_dialog(self) -> None:
+        if self._exclusions_busy:
+            QMessageBox.information(None, "VPN Exceptions", "Still applying the last change — try again in a moment.")
+            return
+        self.runner.submit(lambda: exclusions.load(self.cli), on_finished=self._on_exclusions_loaded)
+
+    def _on_exclusions_loaded(self, loaded: ExclusionsState | str) -> None:
+        if isinstance(loaded, str):
+            QMessageBox.warning(None, "VPN Exceptions", loaded)
+            self._record_error("exclusions_load_failed", loaded)
+            return
+        dialog = ExclusionsDialog(loaded)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        wanted = dialog.result_state()
+        if wanted == loaded:
+            return
+        self._exclusions_busy = True
+        self.runner.submit(lambda: exclusions.apply(self.cli, loaded, wanted), on_finished=self._on_exclusions_applied)
+
+    def _on_exclusions_applied(self, problems: list[str]) -> None:
+        self._exclusions_busy = False
+        if problems:
+            message = "\n".join(problems)
+            self._record_error("exclusions_apply_failed", message)
+            QMessageBox.warning(None, "VPN Exceptions", f"Some changes didn't apply:\n\n{message}")
+        else:
+            self.notifier.notify("AdGuard VPN", "Exceptions updated.")
+        self.poller.force_repoll()  # the CLI briefly re-applies settings to a live tunnel
 
     # -- locations -----------------------------------------------------------
 

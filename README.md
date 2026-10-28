@@ -88,6 +88,11 @@ The first menu line is the current status, with the cause if there's an error. *
 
 **Locations** supports **Manage Favorites…** — pin frequently-used cities to a **★ Favorites** section at the top of the list, above the continent groupings.
 
+### Exceptions and gaming mode
+
+- **Settings → Exceptions…** — edit the CLI's site exclusions: send everything through the VPN *except* the listed domains, IPs and CIDR ranges, or send *only* those through it. Each mode keeps its own list, and changes apply to an open connection straight away.
+- **Gaming mode** (main menu, programs under **Settings → Gaming mode programs…**) — while any listed program runs, the tray disconnects the VPN, then reconnects to the same location once they've all closed. Pick a running program or type a name (`*` wildcards, not case-sensitive); Wine and Proton games match by their `.exe` name. `adguardvpn-cli` can't exclude individual apps, so this pauses the whole VPN rather than splitting one game off. Connecting by hand during a game keeps the VPN on until that game closes.
+
 ## Packaging (Arch / CachyOS)
 
 A `PKGBUILD` is provided under [`packaging/`](packaging/). It builds from the tagged GitHub release matching `pkgver`:
