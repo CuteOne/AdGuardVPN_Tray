@@ -7,6 +7,7 @@ _RESOURCES_DIR = constants.ICONS_DIR
 
 _STATE_TO_FILE = {
     ConnectionState.CONNECTED: "connected.png",
+    ConnectionState.WAITING_FOR_NETWORK: "unknown.png",
     ConnectionState.DISCONNECTED: "disconnected.png",
     ConnectionState.ERROR: "disconnected.png",
     ConnectionState.NOT_LOGGED_IN: "disconnected.png",

@@ -1,0 +1,2 @@
+Network lost. Waiting to connect to SãO PAULO in TUN mode, running on tun0
+You can disconnect by running `/usr/local/bin/adguardvpn-cli disconnect`

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox, QSystem
 from adguardvpn_tray import __version__, constants
 from adguardvpn_tray.adapters.cli_adapter import CliAdapter
 from adguardvpn_tray.config.app_config import AppConfig
-from adguardvpn_tray.models.types import ConnectionState, ConnectionStatus, LicenseInfo
+from adguardvpn_tray.models.types import TUNNEL_UP_STATES, ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.locations_parser import parse_locations
 from adguardvpn_tray.services import autostart, error_reporter, ip_checker, privilege_setup, status_report, vpn_control
@@ -222,7 +222,7 @@ class TrayIcon(QSystemTrayIcon):
         if state == ConnectionState.NOT_LOGGED_IN:
             self._primary_action.setText("Log in…")
             self._primary_action.setEnabled(True)
-        elif state == ConnectionState.CONNECTED:
+        elif state in TUNNEL_UP_STATES:
             self._primary_action.setText("Disconnect")
             self._primary_action.setEnabled(True)
         elif state in (ConnectionState.CONNECTING, ConnectionState.DISCONNECTING):
@@ -239,6 +239,12 @@ class TrayIcon(QSystemTrayIcon):
         if state == ConnectionState.CONNECTED:
             location = self._status.location or "VPN"
             return f"Connected: {location}", f"AdGuard VPN — Connected to {location}"
+        if state == ConnectionState.WAITING_FOR_NETWORK:
+            location = self._status.location or "VPN"
+            return (
+                f"Waiting for network: {location}",
+                f"AdGuard VPN — Network lost, waiting to reconnect to {location}",
+            )
         if state == ConnectionState.CONNECTING:
             return "Connecting…", "AdGuard VPN — Connecting…"
         if state == ConnectionState.DISCONNECTING:
@@ -283,15 +289,19 @@ class TrayIcon(QSystemTrayIcon):
             # Not written to the error log: polls repeat every few seconds and would flood it.
             self._last_error = ErrorRecord(self._last_status_at, "status", status.raw_text or "Couldn't read VPN status")
 
-        if previous_optimistic == ConnectionState.CONNECTING and status.state == ConnectionState.CONNECTED:
+        if previous_optimistic == ConnectionState.CONNECTING and status.state in TUNNEL_UP_STATES:
+            # The connect went through even if the network dropped straight after;
+            # keeping CONNECTING would end in a bogus "timed out" error.
             self._optimistic = None
-            self.notifier.notify("AdGuard VPN", f"Connected to {status.location or 'VPN'}")
-            self._maybe_verify_post_connect_ip()
+            if status.state == ConnectionState.CONNECTED:
+                self.notifier.notify("AdGuard VPN", f"Connected to {status.location or 'VPN'}")
+                self._maybe_verify_post_connect_ip()
         # DISCONNECTING is resolved by _on_disconnect_result, which verifies the outcome.
 
-        if status.state == ConnectionState.CONNECTED:
+        if status.state in TUNNEL_UP_STATES:
             self._was_connected = True
-            self._reconnect_attempts = 0
+            if status.state == ConnectionState.CONNECTED:
+                self._reconnect_attempts = 0
         elif status.state == ConnectionState.DISCONNECTED:
             # No optimistic action in flight means WE didn't cause this transition
             # (not a user-initiated disconnect, not a location switch) - it's a real drop.
@@ -328,7 +338,7 @@ class TrayIcon(QSystemTrayIcon):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         # The dialog is modal but polling continues - only act if it's still connected.
-        if reply == QMessageBox.StandardButton.Yes and self._effective_state() == ConnectionState.CONNECTED:
+        if reply == QMessageBox.StandardButton.Yes and self._effective_state() in TUNNEL_UP_STATES:
             self._do_disconnect()
 
     def _handle_unexpected_drop(self) -> None:
@@ -415,7 +425,7 @@ class TrayIcon(QSystemTrayIcon):
         state = self._effective_state()
         if state == ConnectionState.NOT_LOGGED_IN:
             self._open_login_dialog()
-        elif state == ConnectionState.CONNECTED:
+        elif state in TUNNEL_UP_STATES:
             self._do_disconnect()
         elif state in (ConnectionState.DISCONNECTED, ConnectionState.ERROR, ConnectionState.UNKNOWN):
             fastest = self.config.default_connect_target == "fastest"
@@ -468,7 +478,7 @@ class TrayIcon(QSystemTrayIcon):
             self._refresh_ui()
             return
 
-        if outcome.status.state == ConnectionState.CONNECTED:
+        if outcome.status.state in TUNNEL_UP_STATES:
             self._status = outcome.status
         else:
             self._status = ConnectionStatus(state=ConnectionState.ERROR, raw_text=outcome.message)

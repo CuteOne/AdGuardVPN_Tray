@@ -28,8 +28,8 @@ def snapshot(**overrides) -> StatusSnapshot:
 
 
 class ShortReasonTests(unittest.TestCase):
-    def test_first_non_empty_line(self):
-        self.assertEqual(status_report.short_reason("\n  Timed out reading VPN status\nmore detail"), "Timed out reading VPN status")
+    def test_lines_are_joined_into_one(self):
+        self.assertEqual(status_report.short_reason("\n  Connect failed:\nno route to host"), "Connect failed: no route to host")
 
     def test_ansi_is_stripped(self):
         self.assertEqual(status_report.short_reason("\x1b[31mConnection refused\x1b[0m"), "Connection refused")
@@ -41,6 +41,27 @@ class ShortReasonTests(unittest.TestCase):
 
     def test_empty_text(self):
         self.assertEqual(status_report.short_reason(""), "unknown error")
+
+    def test_cli_usage_hint_is_dropped(self):
+        text = "Something failed\nYou can disconnect by running `/usr/local/bin/adguardvpn-cli disconnect`\n"
+        self.assertEqual(status_report.short_reason(text), "Something failed")
+
+
+class OneLineTests(unittest.TestCase):
+    def test_multi_line_output_is_joined_without_hints(self):
+        # A multi-line message used to split the copied text, so its second line
+        # looked like a separate field.
+        text = (FIXTURES / "status_waiting_for_network.txt").read_text()
+        self.assertEqual(
+            status_report.one_line(text), "Network lost. Waiting to connect to SãO PAULO in TUN mode, running on tun0"
+        )
+
+    def test_other_cli_hints_are_dropped(self):
+        text = "VPN is disconnected\nYou can connect to a location by running `adguardvpn-cli connect -l 'city, country or ISO code'`"
+        self.assertEqual(status_report.one_line(text), "VPN is disconnected")
+
+    def test_ordinary_lines_are_kept(self):
+        self.assertEqual(status_report.one_line("first\n\n  second  \n"), "first second")
 
 
 class StatusFromResultTests(unittest.TestCase):
@@ -80,6 +101,22 @@ class DetailRowsTests(unittest.TestCase):
         self.assertNotIn("Location", rows)
         self.assertEqual(rows["Last check"], "09:28:41 — couldn't read status (checks every 6 s)")
         self.assertEqual(rows["Last error"], "09:28:41 — Timed out reading VPN status")
+
+    def test_waiting_for_network_keeps_connection_details_and_is_not_an_error(self):
+        waiting = ConnectionStatus(state=ConnectionState.WAITING_FOR_NETWORK, location="ATLANTA", mode="TUN", interface="tun0")
+        rows = dict(status_report.detail_rows(snapshot(summary="Waiting for network: ATLANTA", status=waiting)))
+        self.assertEqual(rows["Location"], "ATLANTA")
+        self.assertEqual(rows["Last check"], "09:28:41 — OK (checks every 6 s)")
+
+    def test_multi_line_last_error_stays_on_one_line_in_copied_text(self):
+        message = (FIXTURES / "status_waiting_for_network.txt").read_text()
+        text = status_report.as_text(
+            status_report.detail_rows(snapshot(last_error=ErrorRecord(AT, "status", message)), include_email=False)
+        )
+        self.assertNotIn("You can disconnect", text)
+        # Every line of the copied text is a "Label: value" field (after the title).
+        for line in text.splitlines()[1:]:
+            self.assertRegex(line, r"^[A-Z][A-Za-z ]+: ")
 
     def test_public_ip(self):
         self.assertEqual(dict(status_report.detail_rows(snapshot()))["Public IP"], "Not checked yet")

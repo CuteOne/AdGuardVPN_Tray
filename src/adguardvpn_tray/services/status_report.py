@@ -1,7 +1,8 @@
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from adguardvpn_tray.models.types import ConnectionState, ConnectionStatus, LicenseInfo
+from adguardvpn_tray.models.types import TUNNEL_UP_STATES, ConnectionState, ConnectionStatus, LicenseInfo
 from adguardvpn_tray.parsers.ansi import strip_ansi
 
 SHORT_REASON_MAX_CHARS = 60
@@ -11,6 +12,9 @@ DIAGNOSTICS_NOTE = (
 )
 # Appended to error notifications so they point somewhere the user can look.
 DETAILS_HINT = "Open Status details in the tray menu for more."
+# The CLI follows most messages with usage hints like "You can disconnect by running
+# `adguardvpn-cli disconnect`" - noise in the tray, which has its own buttons for that.
+_CLI_HINT_RE = re.compile(r"^You can .+ by running `[^`]+`\.?$", re.IGNORECASE)
 
 
 @dataclass
@@ -34,10 +38,15 @@ class StatusSnapshot:
     license: LicenseInfo | None = None
 
 
-def short_reason(text: str, max_chars: int = SHORT_REASON_MAX_CHARS) -> str:
-    """First non-empty line of an error, trimmed to fit a menu item."""
+def one_line(text: str) -> str:
+    """CLI output as a single line: ANSI codes and usage hints removed, lines joined."""
     lines = [line.strip() for line in strip_ansi(text or "").splitlines()]
-    reason = next((line for line in lines if line), "unknown error")
+    return " ".join(line for line in lines if line and not _CLI_HINT_RE.match(line))
+
+
+def short_reason(text: str, max_chars: int = SHORT_REASON_MAX_CHARS) -> str:
+    """An error as one line, trimmed to fit a menu item."""
+    reason = one_line(text) or "unknown error"
     if len(reason) > max_chars:
         reason = reason[: max_chars - 1].rstrip() + "…"
     return reason
@@ -52,7 +61,7 @@ def detail_rows(snapshot: StatusSnapshot, include_email: bool = True) -> list[tu
     status = snapshot.status
     rows = [("Status", snapshot.summary)]
 
-    if status.state == ConnectionState.CONNECTED:
+    if status.state in TUNNEL_UP_STATES:
         rows.append(("Location", status.location or "Unknown"))
         rows.append(("Mode", status.mode or "Unknown"))
         rows.append(("Interface", status.interface or "Unknown"))
@@ -65,7 +74,7 @@ def detail_rows(snapshot: StatusSnapshot, include_email: bool = True) -> list[tu
     rows.append(("Last check", f"{last_check} (checks every {snapshot.refresh_interval_s} s)"))
 
     error = snapshot.last_error
-    rows.append(("Last error", f"{_clock(error.at)} — {error.message.strip()}" if error else "None since the tray started"))
+    rows.append(("Last error", f"{_clock(error.at)} — {one_line(error.message)}" if error else "None since the tray started"))
 
     if not snapshot.ip_checks_enabled:
         public_ip = "IP checks are off"

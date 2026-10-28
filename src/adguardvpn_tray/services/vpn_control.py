@@ -6,7 +6,7 @@ from typing import Callable
 from adguardvpn_tray import constants
 from adguardvpn_tray.adapters.cli_adapter import CliAdapter
 from adguardvpn_tray.config.app_config import AppConfig
-from adguardvpn_tray.models.types import CliResult, ConnectionState, ConnectionStatus
+from adguardvpn_tray.models.types import TUNNEL_UP_STATES, CliResult, ConnectionState, ConnectionStatus
 from adguardvpn_tray.parsers.ansi import strip_ansi
 from adguardvpn_tray.parsers.status_parser import parse_status
 
@@ -32,7 +32,7 @@ def startup_action(status: ConnectionStatus, auto_connect_on_launch: bool) -> St
     # Only a definite CONNECTED/DISCONNECTED settles it - an ERROR (e.g. a status
     # timeout) must not be read as "disconnected", or we'd stack a second connect
     # on top of a tunnel that is still up.
-    if status.state == ConnectionState.CONNECTED:
+    if status.state in TUNNEL_UP_STATES:
         return StartupAction.ADOPT if auto_connect_on_launch else StartupAction.OFFER_DISCONNECT
     if status.state == ConnectionState.DISCONNECTED:
         return StartupAction.CONNECT if auto_connect_on_launch else StartupAction.NONE
@@ -75,10 +75,10 @@ def disconnect_and_verify(
         status = read_status(cli, status_timeout_s)
         if status.state == ConnectionState.DISCONNECTED:
             return DisconnectOutcome(verified=True, status=status)
-        if status.state == ConnectionState.CONNECTED and cli_error:
+        if status.state in TUNNEL_UP_STATES and cli_error:
             break  # disconnect itself failed - waiting won't bring the tunnel down
 
-    if status.state == ConnectionState.CONNECTED:
+    if status.state in TUNNEL_UP_STATES:
         message = f"The VPN is still connected to {status.location or 'a VPN location'}."
     else:
         message = "Couldn't confirm that the VPN disconnected."

@@ -136,6 +136,12 @@ class StartupActionTests(unittest.TestCase):
         action = vpn_control.startup_action(self.status(ConnectionState.CONNECTED), auto_connect_on_launch=True)
         self.assertEqual(action, StartupAction.ADOPT)
 
+    def test_waiting_for_network_counts_as_an_existing_tunnel(self):
+        # Connecting on top of a tunnel that is only waiting for the network would stack a second one.
+        waiting = ConnectionStatus(state=ConnectionState.WAITING_FOR_NETWORK, location="ATLANTA")
+        self.assertEqual(vpn_control.startup_action(waiting, auto_connect_on_launch=True), StartupAction.ADOPT)
+        self.assertEqual(vpn_control.startup_action(waiting, auto_connect_on_launch=False), StartupAction.OFFER_DISCONNECT)
+
     def test_disconnected_with_auto_connect(self):
         action = vpn_control.startup_action(self.status(ConnectionState.DISCONNECTED), auto_connect_on_launch=True)
         self.assertEqual(action, StartupAction.CONNECT)

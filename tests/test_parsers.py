@@ -29,6 +29,14 @@ class StatusParserTests(unittest.TestCase):
         self.assertEqual(status.mode, "TUN")
         self.assertEqual(status.interface, "tun0")
 
+    def test_network_lost_is_waiting_not_error(self):
+        # Real output during a Wi-Fi drop: the tunnel is up and the CLI is retrying.
+        status = parse_status(read_fixture("status_waiting_for_network.txt"), exit_code=0)
+        self.assertEqual(status.state, ConnectionState.WAITING_FOR_NETWORK)
+        self.assertEqual(status.location, "SãO PAULO")
+        self.assertEqual(status.mode, "TUN")
+        self.assertEqual(status.interface, "tun0")
+
     def test_active_but_unavailable_exit_code_10(self):
         status = parse_status("VPN active, but status unavailable", exit_code=10)
         self.assertEqual(status.state, ConnectionState.CONNECTED)
