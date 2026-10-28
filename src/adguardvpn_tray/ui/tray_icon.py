@@ -15,6 +15,7 @@ from adguardvpn_tray.services import autostart, error_reporter, ip_checker, priv
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.notifier import Notifier
 from adguardvpn_tray.services.poller import Poller
+from adguardvpn_tray.services.privilege_setup import SetupState
 from adguardvpn_tray.services.status_report import DETAILS_HINT, ErrorRecord, StatusSnapshot
 from adguardvpn_tray.services.update_checker import UpdateChecker
 from adguardvpn_tray.services.vpn_control import DisconnectOutcome, StartupAction
@@ -723,33 +724,61 @@ class TrayIcon(QSystemTrayIcon):
 
     def _check_privilege_setup(self) -> None:
         self.runner.submit(
-            lambda: privilege_setup.is_configured(self.cli.binary_path),
+            lambda: privilege_setup.check_state(self.cli.binary_path),
             on_finished=self._on_startup_privilege_check_result,
         )
 
-    def _on_startup_privilege_check_result(self, configured: bool) -> None:
-        if configured:
+    def _on_startup_privilege_check_result(self, state: SetupState) -> None:
+        if state == SetupState.MISSING:
+            reply = QMessageBox.question(
+                None,
+                "One-time setup needed",
+                "AdGuard VPN Tray needs a one-time permission grant to connect/disconnect the VPN.\n\n"
+                "This will show a system authentication prompt once — no manual file editing required.\n\n"
+                "Set up now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+        elif state == SetupState.BROAD:
+            reply = QMessageBox.question(
+                None,
+                "Tighten VPN permissions",
+                "Your current VPN permission lets any program running as you run adguardvpn-cli "
+                "as root with any options, without a password.\n\n"
+                "Replace it with one limited to what the tray needs (connect, disconnect, update)? "
+                "This shows a system authentication prompt once.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+        else:
+            if state == SetupState.UNSAFE_BINARY:
+                self._warn_unsafe_binary()
             return
-        reply = QMessageBox.question(
-            None,
-            "One-time setup needed",
-            "AdGuard VPN Tray needs a one-time permission grant to connect/disconnect the VPN.\n\n"
-            "This will show a system authentication prompt once — no manual file editing required.\n\n"
-            "Set up now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
         if reply == QMessageBox.StandardButton.Yes:
             self._run_privilege_setup()
 
+    def _warn_unsafe_binary(self) -> None:
+        problem = privilege_setup.binary_path_problem(self.cli.binary_path) or ""
+        self._record_error("unsafe_cli_binary", problem)
+        QMessageBox.warning(
+            None,
+            "VPN permissions are unsafe",
+            "The tray can run adguardvpn-cli as root without a password, but your user account "
+            "can replace that binary — so anything running as you could get root.\n\n"
+            f"{problem}\n\n"
+            "AdGuard's installer or updater may set this ownership; check again after updating.",
+        )
+
     def _on_setup_permissions_clicked(self) -> None:
         self.runner.submit(
-            lambda: privilege_setup.is_configured(self.cli.binary_path),
+            lambda: privilege_setup.check_state(self.cli.binary_path),
             on_finished=self._on_manual_privilege_check_result,
         )
 
-    def _on_manual_privilege_check_result(self, configured: bool) -> None:
-        if configured:
+    def _on_manual_privilege_check_result(self, state: SetupState) -> None:
+        if state == SetupState.OK:
             QMessageBox.information(None, "VPN Permissions", "Already configured.")
+            return
+        if state == SetupState.UNSAFE_BINARY:
+            self._warn_unsafe_binary()
             return
         self._run_privilege_setup()
 
@@ -773,6 +802,7 @@ class TrayIcon(QSystemTrayIcon):
             "About AdGuard VPN Tray",
             f"<b>AdGuard VPN Tray</b> v{__version__}<br><br>"
             "A KDE Plasma system tray application for managing AdGuard VPN.<br><br>"
+            "Unofficial: not affiliated with, endorsed by, or supported by AdGuard.<br><br>"
             "License: MIT",
         )
 
