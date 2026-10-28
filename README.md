@@ -90,7 +90,7 @@ The first menu line is the current status, with the cause if there's an error. *
 
 ## Packaging (Arch / CachyOS)
 
-A `PKGBUILD` is provided under [`packaging/`](packaging/). Once this repo has a real GitHub URL and a tagged release, update the `url`/`source` line in `packaging/PKGBUILD` accordingly, then:
+A `PKGBUILD` is provided under [`packaging/`](packaging/). It builds from the tagged GitHub release matching `pkgver`:
 
 ```bash
 cd packaging

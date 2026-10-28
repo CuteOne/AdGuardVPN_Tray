@@ -9,6 +9,9 @@ dependencies = [
     "pexpect",
 ]
 
+[project.urls]
+Homepage = "https://github.com/CuteOne/AdGuardVPN_Tray"
+
 [project.scripts]
 adguardvpn-tray = "adguardvpn_tray.app:main"
 
