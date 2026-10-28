@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 from adguardvpn_tray import constants
 from adguardvpn_tray.config.app_config import AppConfig
 from adguardvpn_tray.models.types import ConnectionState
-from adguardvpn_tray.services import shutdown
+from adguardvpn_tray.services import shutdown, single_instance
 from adguardvpn_tray.ui import icons
 from adguardvpn_tray.ui.tray_icon import TrayIcon
 
@@ -18,6 +18,11 @@ def main() -> int:
     app.setApplicationDisplayName("AdGuard VPN")
     app.setDesktopFileName("adguardvpn-tray")
     app.setWindowIcon(icons.icon_for_state(ConnectionState.CONNECTED))
+
+    instance_lock = single_instance.acquire()
+    if instance_lock is None:
+        QMessageBox.information(None, "AdGuard VPN Tray", "AdGuard VPN Tray is already running in the system tray.")
+        return 0
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(None, "AdGuard VPN Tray", "No system tray is available on this desktop session.")

@@ -8,6 +8,12 @@ from adguardvpn_tray.models.types import CliResult
 _LOCALE_ENV = {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
 
 
+def _as_text(output: str | bytes | None) -> str:
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output or ""
+
+
 class CliAdapter:
     """Thin wrapper around the adguardvpn-cli subprocess. No parsing here."""
 
@@ -73,9 +79,10 @@ class CliAdapter:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
+            # TimeoutExpired carries partial output as bytes even with text=True.
             return CliResult(
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=_as_text(exc.stdout),
+                stderr=_as_text(exc.stderr),
                 returncode=-1,
                 timed_out=True,
             )

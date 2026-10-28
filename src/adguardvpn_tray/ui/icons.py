@@ -6,6 +6,9 @@ from adguardvpn_tray.models.types import ConnectionState
 
 _RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources" / "icons"
 
+# The AdGuard shield - used for the app launcher and autostart entries.
+APP_ICON_PATH = _RESOURCES_DIR / "connected.png"
+
 _STATE_TO_FILE = {
     ConnectionState.CONNECTED: "connected.png",
     ConnectionState.DISCONNECTED: "disconnected.png",

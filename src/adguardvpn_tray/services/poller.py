@@ -65,5 +65,9 @@ class Poller(QObject):
         if result.binary_missing:
             self.cli_missing.emit()
             return
+        if result.timed_out:
+            # Partial output has no "Logged in as" line and would read as logged out -
+            # keep the last known license until a check actually completes.
+            return
         info = parse_license(result.stdout)
         self.license_updated.emit(info)

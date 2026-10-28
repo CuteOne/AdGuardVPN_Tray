@@ -3,6 +3,6 @@ Type=Application
 Name=AdGuard VPN Tray
 Comment=System tray manager for AdGuard VPN
 Exec=adguardvpn-tray
-Icon=network-vpn
+Icon=adguardvpn-tray
 Terminal=false
 Categories=Network;
