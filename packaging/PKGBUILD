@@ -17,7 +17,7 @@ makedepends=('python-build' 'python-installer' 'python-wheel')
 optdepends=('adguardvpn-cli: the VPN client this app manages')
 install="${pkgname}.install"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('ecb4f02238626c8d42bc5af97b879f9d7374baa34f13277ed4ecfae57f0e048f')
 
 build() {
 	cd "$_reponame-$pkgver"
