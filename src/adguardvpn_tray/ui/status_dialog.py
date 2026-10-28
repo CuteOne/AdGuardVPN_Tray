@@ -20,7 +20,7 @@ class StatusDetailsDialog(QDialog):
 
     def __init__(self, on_open_diagnostics: Callable[[], None], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AdGuard VPN Status")
+        self.setWindowTitle("Status details")
         self.setMinimumWidth(460)
         self._copy_text = ""
 

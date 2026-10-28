@@ -809,7 +809,7 @@ class TrayIcon(QSystemTrayIcon):
     def _show_about(self) -> None:
         QMessageBox.about(
             None,
-            "About AdGuard VPN Tray",
+            "About",
             f"<b>AdGuard VPN Tray</b> v{__version__}<br><br>"
             "A KDE Plasma system tray application for managing AdGuard VPN.<br><br>"
             "Unofficial: not affiliated with, endorsed by, or supported by AdGuard.<br><br>"

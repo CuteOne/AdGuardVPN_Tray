@@ -16,7 +16,7 @@ from adguardvpn_tray.services.login_service import LoginService
 class LoginDialog(QDialog):
     def __init__(self, binary_path: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Log in to AdGuard VPN")
+        self.setWindowTitle("Log in")
         self.setMinimumWidth(420)
 
         self._status_label = QLabel("Starting login…")

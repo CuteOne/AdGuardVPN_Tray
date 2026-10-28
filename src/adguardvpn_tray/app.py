@@ -21,11 +21,11 @@ def main() -> int:
 
     instance_lock = single_instance.acquire()
     if instance_lock is None:
-        QMessageBox.information(None, "AdGuard VPN Tray", "AdGuard VPN Tray is already running in the system tray.")
+        QMessageBox.information(None, "Already running", "AdGuard VPN Tray is already running in the system tray.")
         return 0
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, "AdGuard VPN Tray", "No system tray is available on this desktop session.")
+        QMessageBox.critical(None, "No system tray", "No system tray is available on this desktop session.")
         return 1
 
     config = AppConfig.load()
