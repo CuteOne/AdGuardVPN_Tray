@@ -16,7 +16,7 @@ from adguardvpn_tray.models.types import CliResult
 from adguardvpn_tray.services import autostart, single_instance
 from adguardvpn_tray.services.command_runner import CommandRunner
 from adguardvpn_tray.services.poller import Poller
-from adguardvpn_tray.ui import icons
+from adguardvpn_tray import constants
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 
@@ -79,8 +79,8 @@ class AutostartTests(unittest.TestCase):
 
     def test_entry_uses_adguard_icon(self):
         autostart.enable()
-        self.assertIn(f"Icon={icons.APP_ICON_PATH}\n", autostart.autostart_path().read_text())
-        self.assertTrue(icons.APP_ICON_PATH.is_file())
+        self.assertIn(f"Icon={constants.APP_ICON_PATH}\n", autostart.autostart_path().read_text())
+        self.assertTrue(constants.APP_ICON_PATH.is_file())
 
 
 class SingleInstanceTests(unittest.TestCase):

@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 from adguardvpn_tray import constants
-from adguardvpn_tray.ui import icons
 
 _DESKTOP_ENTRY_TEMPLATE = """[Desktop Entry]
 Type=Application
@@ -34,7 +33,7 @@ def is_enabled() -> bool:
 def enable() -> None:
     path = autostart_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_DESKTOP_ENTRY_TEMPLATE.format(exec_cmd=_exec_command(), icon=icons.APP_ICON_PATH))
+    path.write_text(_DESKTOP_ENTRY_TEMPLATE.format(exec_cmd=_exec_command(), icon=constants.APP_ICON_PATH))
     # Not executable: systemd-xdg-autostart-generator warns about executable entries.
     path.chmod(0o644)
 

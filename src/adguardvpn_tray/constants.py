@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 
 DEFAULT_BINARY_PATH = shutil.which("adguardvpn-cli") or "/usr/local/bin/adguardvpn-cli"
 
@@ -40,5 +41,9 @@ IP_VERIFY_MAX_ATTEMPTS = 4
 
 APP_CONFIG_DIR = "adguardvpn-tray"
 AUTOSTART_DESKTOP_FILENAME = "adguardvpn-tray.desktop"
+
+ICONS_DIR = Path(__file__).resolve().parent / "resources" / "icons"
+# The AdGuard shield - used for the app launcher and autostart entries.
+APP_ICON_PATH = ICONS_DIR / "connected.png"
 
 UPDATE_CHECK_INTERVAL_S = 24 * 60 * 60
